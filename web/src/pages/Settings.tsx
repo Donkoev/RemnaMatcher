@@ -1,11 +1,77 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Flex, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, Tooltip } from '@mantine/core';
-import { TbCheck, TbSettings } from 'react-icons/tb';
+import { Badge, Button, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, ThemeIcon, Title, Tooltip } from '@mantine/core';
+import {
+  TbAdjustmentsHorizontal,
+  TbBrandTelegram,
+  TbCheck,
+  TbClock,
+  TbDatabase,
+  TbListSearch,
+  TbSettings,
+  TbShieldLock,
+} from 'react-icons/tb';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi, type ScoringConfig } from '../api';
 import { PageHeader } from '../components/rw/PageHeader';
 import { SectionCard } from '../components/rw/SectionCard';
 import { UpdateSection } from '../components/UpdateSection';
+
+// карточка настроек в стиле Remnawave: иконка в soft-квадрате, заголовок с подписью,
+// содержимое и своя кнопка «Сохранить» в правом нижнем углу
+function SettingsCard({
+  icon,
+  title,
+  subtitle,
+  children,
+  onSave,
+  saving,
+  saved,
+}: {
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  onSave?: () => void;
+  saved?: boolean;
+  saving?: boolean;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <SectionCard.Root gap="md">
+      <SectionCard.Section>
+        <Group gap="sm" wrap="nowrap">
+          <ThemeIcon color="cyan" size="lg" variant="soft">
+            {icon}
+          </ThemeIcon>
+          <Stack gap={0}>
+            <Title c="white" order={5}>
+              {title}
+            </Title>
+            <Text c="dimmed" fz="xs">
+              {subtitle}
+            </Text>
+          </Stack>
+        </Group>
+      </SectionCard.Section>
+      <SectionCard.Section>{children}</SectionCard.Section>
+      {onSave && (
+        <SectionCard.Section>
+          <Group justify="flex-end">
+            <Button
+              color={saved ? 'teal' : 'cyan'}
+              leftSection={saved ? <TbCheck size={16} /> : undefined}
+              loading={saving}
+              onClick={onSave}
+              size="sm"
+              variant="soft"
+            >
+              {saved ? 'Сохранено' : 'Сохранить'}
+            </Button>
+          </Group>
+        </SectionCard.Section>
+      )}
+    </SectionCard.Root>
+  );
+}
 
 // одинаковая высота под лейбл (до 2 строк) и подсказку — инпуты ряда стоят по одной линии
 const alignedField = {
@@ -87,7 +153,7 @@ export function Settings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings'], queryFn: api.settings });
   const [cfg, setCfg] = useState<ScoringConfig | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [savedCard, setSavedCard] = useState<string | null>(null);
 
   useEffect(() => {
     if (data && !cfg) setCfg(data);
@@ -95,14 +161,25 @@ export function Settings() {
 
   const mutation = useMutation({
     mutationFn: api.saveSettings,
-    onSuccess: () => {
-      setSaved(true);
-      void qc.invalidateQueries({ queryKey: ['settings'] });
-      setTimeout(() => setSaved(false), 3000);
-    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 
   if (!cfg) return null;
+
+  // конфиг один, но у каждой карточки своя кнопка — как в настройках Remnawave
+  const saveFrom = (card: string) => {
+    mutation.mutate(cfg, {
+      onSuccess: () => {
+        setSavedCard(card);
+        setTimeout(() => setSavedCard((prev) => (prev === card ? null : prev)), 3000);
+      },
+    });
+  };
+  const cardProps = (card: string) => ({
+    onSave: () => saveFrom(card),
+    saved: savedCard === card,
+    saving: mutation.isPending,
+  });
 
   return (
     <>
@@ -112,12 +189,13 @@ export function Settings() {
         title="Настройки"
       />
 
-      <Flex align="flex-start" direction={{ base: 'column-reverse', md: 'row' }} gap="md">
-      <SectionCard.Root gap="md" maw={860} style={{ flex: 1 }}>
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Окна и затухание
-          </Text>
+      <div className="rw-settings-columns">
+      <SettingsCard
+        icon={<TbClock size={18} />}
+        subtitle="Окна активности и скорость затухания очков"
+        title="Окна и затухание"
+        {...cardProps('windows')}
+      >
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
               description="IP активен, пока виден в этом окне"
@@ -141,13 +219,15 @@ export function Settings() {
               value={cfg.decayHalfLifeHours}
             />
           </SimpleGrid>
-        </SectionCard.Section>
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Сбор данных
-          </Text>
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
+      <SettingsCard
+        icon={<TbDatabase size={18} />}
+        subtitle="Как часто опрашивать панель и сколько хранить сырые данные"
+        title="Сбор данных"
+        {...cardProps('collector')}
+      >
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
             <NumberInput
               description="Полный цикл по всем нодам"
               label="Опрос нод, сек"
@@ -191,12 +271,14 @@ export function Settings() {
               value={cfg.collector.retentionHours}
             />
           </SimpleGrid>
-        </SectionCard.Section>
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Пороги уровней
-          </Text>
+      <SettingsCard
+        icon={<TbAdjustmentsHorizontal size={18} />}
+        subtitle="Сколько очков фрода включают каждый уровень"
+        title="Пороги уровней"
+        {...cardProps('thresholds')}
+      >
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
               description="Подозрительный"
@@ -220,12 +302,14 @@ export function Settings() {
               value={cfg.thresholds.red}
             />
           </SimpleGrid>
-        </SectionCard.Section>
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Проверки — в порядке приоритета
-          </Text>
+      <SettingsCard
+        icon={<TbListSearch size={18} />}
+        subtitle="В порядке приоритета; бейдж — очки фрода за срабатывание"
+        title="Проверки"
+        {...cardProps('checks')}
+      >
           <Stack gap="sm">
             <Group justify="space-between" wrap="nowrap">
               <Switch
@@ -426,12 +510,14 @@ export function Settings() {
               </Tooltip>
             </Group>
           </Stack>
-        </SectionCard.Section>
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Уведомления
-          </Text>
+      <SettingsCard
+        icon={<TbBrandTelegram size={18} />}
+        subtitle="Алерты в Telegram и кулдаун повторов"
+        title="Уведомления"
+        {...cardProps('alerts')}
+      >
           <Group justify="space-between" wrap="nowrap">
             <Switch
               checked={cfg.telegramAlertsEnabled}
@@ -452,33 +538,18 @@ export function Settings() {
               />
             </Tooltip>
           </Group>
-        </SectionCard.Section>
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Безопасность
-          </Text>
-          <PasswordSection />
-        </SectionCard.Section>
+      <SettingsCard
+        icon={<TbShieldLock size={18} />}
+        subtitle="Смена пароля администратора"
+        title="Безопасность"
+      >
+        <PasswordSection />
+      </SettingsCard>
 
-        <SectionCard.Section>
-          <Group>
-            <Button
-              color={saved ? 'teal' : 'cyan'}
-              leftSection={saved ? <TbCheck size={16} /> : undefined}
-              loading={mutation.isPending}
-              onClick={() => mutation.mutate(cfg)}
-              variant="soft"
-            >
-              {saved ? 'Сохранено' : 'Сохранить'}
-            </Button>
-          </Group>
-        </SectionCard.Section>
-      </SectionCard.Root>
-
-      {/* обновление — отдельной карточкой справа, чтобы не раздувать основной блок */}
       <UpdateSection />
-      </Flex>
+      </div>
     </>
   );
 }

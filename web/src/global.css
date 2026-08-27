@@ -188,3 +188,20 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
   animation: rwFadeIn 200ms linear both;
 }
+
+/* Настройки: колонки независимых карточек, как на странице настроек Remnawave */
+.rw-settings-columns {
+  column-count: 1;
+  column-gap: 16px;
+  max-width: 1320px;
+}
+.rw-settings-columns > * {
+  break-inside: avoid;
+  margin-bottom: 16px;
+  width: 100%;
+}
+@media (min-width: 62em) {
+  .rw-settings-columns {
+    column-count: 2;
+  }
+}
