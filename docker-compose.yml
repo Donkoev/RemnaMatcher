@@ -1,0 +1,12 @@
+services:
+  remnamatcher:
+    build: .
+    image: remnamatcher:latest
+    container_name: remnamatcher
+    restart: unless-stopped
+    env_file: server/.env
+    ports:
+      # только localhost: панель без авторизации — наружу выпускать через reverse-proxy или SSH-туннель
+      - '127.0.0.1:3300:3300'
+    volumes:
+      - ./server/data:/app/server/data

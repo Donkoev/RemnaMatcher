@@ -1,0 +1,190 @@
+@keyframes rwFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+body {
+  min-height: 100vh;
+  /* родной фон панели Remnawave: дефолт Mantine (dark-7 = #161b22) */
+}
+
+/* Скроллбар как в Remnawave */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(22, 27, 35, 0.6);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #0d9488 0%, #06b6d4 100%);
+  border-radius: 4px;
+  border: 1px solid rgba(22, 27, 35, 0.8);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #14b8a6 0%, #22d3ee 100%);
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(22, 27, 35, 0.6);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #0d9488 rgba(22, 27, 35, 0.6);
+}
+
+/* Сайдбар — плавающая карточка с cyan-свечением, как в панели */
+.rw-sidebar {
+  z-index: 200;
+  margin: 0.75rem 0 0.75rem 0.75rem;
+  height: calc(100dvh - 1.5rem);
+  background: linear-gradient(135deg, var(--mantine-color-dark-8) 0%, var(--mantine-color-dark-7) 100%);
+  box-shadow:
+    0 1px 1px hsl(0deg 0% 0% / 0.075),
+    0 2px 2px hsl(0deg 0% 0% / 0.075),
+    0 4px 4px hsl(0deg 0% 0% / 0.075),
+    0 8px 8px hsl(0deg 0% 0% / 0.075),
+    0 16px 16px hsl(0deg 0% 0% / 0.075);
+  border-radius: var(--mantine-radius-lg);
+}
+
+/* на мобиле сайдбар — обычная выезжающая панель на весь экран, без «плавающей карточки» */
+@media (max-width: 48em) {
+  .rw-sidebar {
+    margin: 0;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+.rw-sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--mantine-radius-lg);
+  background: radial-gradient(circle at 20% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.rw-logo-section {
+  position: relative;
+  padding-bottom: var(--mantine-spacing-sm);
+  padding-top: 4px;
+}
+
+.rw-logo-section::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: var(--mantine-spacing-md);
+  right: var(--mantine-spacing-md);
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(6, 182, 212, 0.3) 50%, transparent 100%);
+}
+
+/* Пункты навигации: активный — cyan-градиент с боковыми рамками */
+.rw-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--mantine-radius-md);
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  color: var(--mantine-color-dark-1);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rw-nav-link::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 0%, rgba(6, 182, 212, 0.05) 50%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rw-nav-link:hover::before {
+  opacity: 1;
+}
+
+.rw-nav-link:hover {
+  transform: translateX(2px);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.rw-nav-link[data-active='true'] {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(6, 182, 212, 0.1) 100%);
+  border-left: 3px solid var(--mantine-color-cyan-4);
+  border-right: 3px solid var(--mantine-color-cyan-4);
+  transform: translateX(2px);
+  color: var(--mantine-color-white);
+}
+
+.rw-nav-link svg {
+  height: 20px;
+  width: 20px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rw-nav-link:hover svg {
+  transform: scale(1.1);
+  filter: drop-shadow(0 2px 4px rgba(6, 182, 212, 0.3));
+}
+
+.rw-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--mantine-color-dark-2);
+  margin-bottom: var(--mantine-spacing-sm);
+  padding-left: var(--mantine-spacing-xl);
+  position: relative;
+}
+
+.rw-section-title::before {
+  content: '';
+  position: absolute;
+  left: var(--mantine-spacing-md);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 12px;
+  background: linear-gradient(45deg, var(--mantine-color-cyan-4), var(--mantine-color-blue-4));
+  border-radius: 2px;
+}
+
+.mono {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 15px;
+}
+
+@media (max-width: 48em) {
+  .mono {
+    font-size: 13px;
+  }
+}
+
+/* Плоские карточки-секции (SectionCard из Remnawave) */
+.rw-section-card {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  animation: rwFadeIn 200ms linear both;
+}
