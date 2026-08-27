@@ -477,14 +477,7 @@ export function Settings() {
       </SectionCard.Root>
 
       {/* обновление — отдельной карточкой справа, чтобы не раздувать основной блок */}
-      <SectionCard.Root gap="sm" w={{ base: '100%', md: 300 }}>
-        <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Обновление
-          </Text>
-          <UpdateSection />
-        </SectionCard.Section>
-      </SectionCard.Root>
+      <UpdateSection />
       </Flex>
     </>
   );

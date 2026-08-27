@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge, Button, Group, Modal, Progress, Stack, Text, ThemeIcon } from '@mantine/core';
-import { TbCheck, TbCloudDownload, TbRefresh, TbRocket } from 'react-icons/tb';
+import { Badge, Button, Group, Modal, Progress, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { TbCheck, TbCloudDownload, TbRefresh, TbRocket, TbVersions } from 'react-icons/tb';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { updateApi } from '../api';
+import { SectionCard } from './rw/SectionCard';
 
 type Phase = 'idle' | 'requested' | 'restarting' | 'done' | 'failed';
 
@@ -73,40 +74,64 @@ export function UpdateSection() {
 
   return (
     <>
-      <Stack gap="sm">
-        <Group gap="xs">
-          <Badge color="gray" size="lg" variant="outline">
-            v{data?.current ?? '…'}
-          </Badge>
-          {data?.updateAvailable && (
-            <Badge color="cyan" size="lg" variant="soft">
-              доступна v{data.latest}
-            </Badge>
-          )}
-        </Group>
-        {!data?.updateAvailable && (
-          <Text c="dimmed" fz="sm">
-            {data?.pending ? 'Обновление уже запрошено…' : 'Это последняя версия'}
-          </Text>
-        )}
-        <Group gap="xs">
-          {data?.updateAvailable && (
-            <Button leftSection={<TbRocket size={16} />} onClick={() => void run()} size="xs" variant="soft">
-              Обновить
+      <SectionCard.Root gap="sm" w={{ base: '100%', md: 340 }}>
+        <SectionCard.Section>
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon color="cyan" size="lg" variant="soft">
+              <TbCloudDownload size={18} />
+            </ThemeIcon>
+            <Title c="white" order={5}>
+              Обновление
+            </Title>
+          </Group>
+        </SectionCard.Section>
+
+        <SectionCard.Section>
+          <Group gap="md" wrap="nowrap">
+            <ThemeIcon color={data?.updateAvailable ? 'cyan' : 'teal'} radius="lg" size="xl" variant="soft">
+              <TbVersions size={24} />
+            </ThemeIcon>
+            <Stack gap={0} miw={0}>
+              <Text c="dimmed" fw={500} fz="sm" lh={1.4} style={{ letterSpacing: '0.01em' }}>
+                Текущая версия
+              </Text>
+              <Text c="white" ff="monospace" fw={700} fz="xl" lh={1.2}>
+                v{data?.current ?? '…'}
+              </Text>
+              {data?.updateAvailable ? (
+                <Badge color="cyan" mt={6} size="sm" variant="soft">
+                  доступна v{data.latest}
+                </Badge>
+              ) : (
+                <Text c="dimmed" fz="xs">
+                  {data?.pending ? 'обновление запрошено…' : 'установлена последняя'}
+                </Text>
+              )}
+            </Stack>
+          </Group>
+        </SectionCard.Section>
+
+        <SectionCard.Section>
+          <Stack gap="xs">
+            {data?.updateAvailable && (
+              <Button fullWidth leftSection={<TbRocket size={16} />} onClick={() => void run()} variant="soft">
+                Обновить до v{data.latest}
+              </Button>
+            )}
+            <Button
+              color="gray"
+              fullWidth
+              leftSection={<TbRefresh size={15} />}
+              loading={isFetching}
+              onClick={() => void refetch()}
+              size="xs"
+              variant="default"
+            >
+              Проверить обновления
             </Button>
-          )}
-          <Button
-            color="gray"
-            leftSection={<TbRefresh size={14} />}
-            loading={isFetching}
-            onClick={() => void refetch()}
-            size="xs"
-            variant="subtle"
-          >
-            Проверить
-          </Button>
-        </Group>
-      </Stack>
+          </Stack>
+        </SectionCard.Section>
+      </SectionCard.Root>
 
       <Modal
         centered
