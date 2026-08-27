@@ -157,17 +157,86 @@ systemctl enable --now remnamatcher-updater.timer >/dev/null 2>&1
 ok "Самообновление включено (кнопка «Обновить» в панели)"
 
 PORT_NOW=$(grep -oP 'PORT=\K[0-9]+' "$ENV_FILE" || echo 3300)
+
+# --- реверс-прокси: nginx + Let's Encrypt (опционально) ---
+PROXY_DOMAIN=""
+NGINX_CONF=""
+for c in /etc/nginx/sites-available/remnamatcher /etc/nginx/conf.d/remnamatcher.conf; do
+  [ -f "$c" ] && NGINX_CONF="$c"
+done
+
+if [ -n "$NGINX_CONF" ]; then
+  PROXY_DOMAIN=$(grep -oP 'server_name \K[^;]+' "$NGINX_CONF" | head -1 || true)
+  ok "Реверс-прокси уже настроен (${PROXY_DOMAIN:-домен не найден})"
+else
+  say ""
+  if confirm "Открыть панель наружу по домену (nginx + бесплатный HTTPS)?" "N"; then
+    say "  ${GRAY}A-запись домена уже должна указывать на IP этого сервера — иначе сертификат не выпустится.${NC}"
+    ask "Домен панели (например match.example.com)" PROXY_DOMAIN
+    ask "E-mail для Let's Encrypt (уведомления об истечении)" LE_EMAIL
+
+    say "  ${GRAY}Ставлю nginx и certbot…${NC}"
+    if command -v apt-get >/dev/null; then
+      apt-get update -qq && apt-get install -yqq nginx certbot python3-certbot-nginx
+    else
+      yum install -y nginx certbot python3-certbot-nginx
+    fi
+
+    if [ -d /etc/nginx/sites-available ]; then
+      NGINX_CONF=/etc/nginx/sites-available/remnamatcher
+    else
+      NGINX_CONF=/etc/nginx/conf.d/remnamatcher.conf
+    fi
+    cat > "$NGINX_CONF" <<EOF
+server {
+    listen 80;
+    server_name ${PROXY_DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:${PORT_NOW};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        # SSE: живые обновления панели не должны буферизоваться
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+EOF
+    [ -d /etc/nginx/sites-enabled ] && ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/remnamatcher
+    nginx -t && systemctl enable --now nginx >/dev/null 2>&1 && systemctl reload nginx
+
+    # файрвол, если включён ufw
+    command -v ufw >/dev/null && ufw status | grep -q active && { ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; }
+
+    if certbot --nginx -d "$PROXY_DOMAIN" --non-interactive --agree-tos -m "$LE_EMAIL" --redirect; then
+      ok "HTTPS выпущен, автопродление включено (systemd-таймер certbot)"
+    else
+      warn "Сертификат не выпустился (обычно — домен ещё не указывает на этот сервер)"
+      say "  ${GRAY}Направь DNS и повтори: certbot --nginx -d ${PROXY_DOMAIN} --redirect${NC}"
+    fi
+  fi
+fi
+
 say ""
 say "${TEAL}${BOLD}  ╔══════════════════════════════════════════╗${NC}"
 say "${TEAL}${BOLD}  ║           Готово — работает!             ║${NC}"
 say "${TEAL}${BOLD}  ╚══════════════════════════════════════════╝${NC}"
 say ""
-say "  Панель:   ${CYAN}http://127.0.0.1:${PORT_NOW}${NC}  ${DIM}(только localhost)${NC}"
+if [ -n "$PROXY_DOMAIN" ]; then
+  say "  Панель:   ${CYAN}https://${PROXY_DOMAIN}${NC}"
+else
+  say "  Панель:   ${CYAN}http://127.0.0.1:${PORT_NOW}${NC}  ${DIM}(только localhost)${NC}"
+fi
 say "  Логи:     ${GRAY}docker logs -f remnamatcher${NC}"
 say "  Рестарт:  ${GRAY}cd ${INSTALL_DIR} && docker compose restart${NC}"
-say "  Обновить: ${GRAY}cd ${INSTALL_DIR} && git pull && docker compose up -d --build${NC}"
+say "  Обновить: ${GRAY}кнопкой в панели или повторным запуском этого скрипта${NC}"
 say ""
 say "  ${YELLOW}▲${NC} При первом входе панель попросит придумать пароль администратора"
-say "  ${GRAY}Доступ с своей машины — через SSH-туннель:${NC}"
-say "  ${DIM}ssh -L ${PORT_NOW}:127.0.0.1:${PORT_NOW} root@сервер  →  открыть http://localhost:${PORT_NOW}${NC}"
+if [ -z "$PROXY_DOMAIN" ]; then
+  say "  ${GRAY}Доступ со своей машины — через SSH-туннель:${NC}"
+  say "  ${DIM}ssh -L ${PORT_NOW}:127.0.0.1:${PORT_NOW} root@сервер  →  открыть http://localhost:${PORT_NOW}${NC}"
+fi
 say ""
