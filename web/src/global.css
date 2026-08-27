@@ -189,7 +189,8 @@ body {
   animation: rwFadeIn 200ms linear both;
 }
 
-/* Настройки: колонки независимых карточек, как на странице настроек Remnawave */
+/* Настройки: колонки независимых карточек, как на странице настроек Remnawave.
+   Справа от них живёт колонка «Обновление», поэтому вторая колонка — только на широких экранах */
 .rw-settings-columns {
   column-count: 1;
   column-gap: 16px;
@@ -200,7 +201,7 @@ body {
   margin-bottom: 16px;
   width: 100%;
 }
-@media (min-width: 62em) {
+@media (min-width: 100em) {
   .rw-settings-columns {
     column-count: 2;
   }

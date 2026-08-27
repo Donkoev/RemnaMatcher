@@ -74,7 +74,7 @@ export function UpdateSection() {
 
   return (
     <>
-      <SectionCard.Root gap="sm">
+      <SectionCard.Root gap="sm" w={{ base: '100%', md: 340 }}>
         <SectionCard.Section>
           <Group gap="sm" wrap="nowrap">
             <ThemeIcon color="cyan" size="lg" variant="soft">

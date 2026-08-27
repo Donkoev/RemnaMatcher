@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, ThemeIcon, Title, Tooltip } from '@mantine/core';
+import { Badge, Button, Flex, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import {
   TbAdjustmentsHorizontal,
   TbBrandTelegram,
@@ -166,7 +166,8 @@ export function Settings() {
         title="Настройки"
       />
 
-      <div className="rw-settings-columns">
+      <Flex align="flex-start" direction={{ base: 'column-reverse', md: 'row' }} gap="md">
+      <div className="rw-settings-columns" style={{ flex: 1 }}>
       <SettingsCard
         icon={<TbClock size={18} />}
         subtitle="Окна активности и скорость затухания очков"
@@ -519,9 +520,11 @@ export function Settings() {
       >
         <PasswordSection />
       </SettingsCard>
-
-      <UpdateSection />
       </div>
+
+      {/* обновление — всегда отдельной колонкой справа */}
+      <UpdateSection />
+      </Flex>
     </>
   );
 }
