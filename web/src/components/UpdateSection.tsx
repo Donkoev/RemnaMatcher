@@ -73,35 +73,40 @@ export function UpdateSection() {
 
   return (
     <>
-      <Group gap="sm" wrap="wrap">
-        <Badge color="gray" size="lg" variant="outline">
-          v{data?.current ?? '…'}
-        </Badge>
-        {data?.updateAvailable ? (
-          <>
+      <Stack gap="sm">
+        <Group gap="xs">
+          <Badge color="gray" size="lg" variant="outline">
+            v{data?.current ?? '…'}
+          </Badge>
+          {data?.updateAvailable && (
             <Badge color="cyan" size="lg" variant="soft">
               доступна v{data.latest}
             </Badge>
-            <Button leftSection={<TbRocket size={16} />} onClick={() => void run()} size="xs" variant="soft">
-              Обновить
-            </Button>
-          </>
-        ) : (
+          )}
+        </Group>
+        {!data?.updateAvailable && (
           <Text c="dimmed" fz="sm">
             {data?.pending ? 'Обновление уже запрошено…' : 'Это последняя версия'}
           </Text>
         )}
-        <Button
-          color="gray"
-          leftSection={<TbRefresh size={14} />}
-          loading={isFetching}
-          onClick={() => void refetch()}
-          size="xs"
-          variant="subtle"
-        >
-          Проверить
-        </Button>
-      </Group>
+        <Group gap="xs">
+          {data?.updateAvailable && (
+            <Button leftSection={<TbRocket size={16} />} onClick={() => void run()} size="xs" variant="soft">
+              Обновить
+            </Button>
+          )}
+          <Button
+            color="gray"
+            leftSection={<TbRefresh size={14} />}
+            loading={isFetching}
+            onClick={() => void refetch()}
+            size="xs"
+            variant="subtle"
+          >
+            Проверить
+          </Button>
+        </Group>
+      </Stack>
 
       <Modal
         centered

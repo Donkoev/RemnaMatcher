@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, Tooltip } from '@mantine/core';
+import { Badge, Button, Flex, Group, NumberInput, PasswordInput, SimpleGrid, Stack, Switch, Text, Tooltip } from '@mantine/core';
 import { TbCheck, TbSettings } from 'react-icons/tb';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi, type ScoringConfig } from '../api';
@@ -112,7 +112,8 @@ export function Settings() {
         title="Настройки"
       />
 
-      <SectionCard.Root gap="md" maw={860}>
+      <Flex align="flex-start" direction={{ base: 'column-reverse', md: 'row' }} gap="md">
+      <SectionCard.Root gap="md" maw={860} style={{ flex: 1 }}>
         <SectionCard.Section>
           <Text fw={600} fz="sm" mb="sm">
             Окна и затухание
@@ -461,13 +462,6 @@ export function Settings() {
         </SectionCard.Section>
 
         <SectionCard.Section>
-          <Text fw={600} fz="sm" mb="sm">
-            Обновление
-          </Text>
-          <UpdateSection />
-        </SectionCard.Section>
-
-        <SectionCard.Section>
           <Group>
             <Button
               color={saved ? 'teal' : 'cyan'}
@@ -481,6 +475,17 @@ export function Settings() {
           </Group>
         </SectionCard.Section>
       </SectionCard.Root>
+
+      {/* обновление — отдельной карточкой справа, чтобы не раздувать основной блок */}
+      <SectionCard.Root gap="sm" w={{ base: '100%', md: 300 }}>
+        <SectionCard.Section>
+          <Text fw={600} fz="sm" mb="sm">
+            Обновление
+          </Text>
+          <UpdateSection />
+        </SectionCard.Section>
+      </SectionCard.Root>
+      </Flex>
     </>
   );
 }
