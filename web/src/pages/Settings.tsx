@@ -16,22 +16,15 @@ import { PageHeader } from '../components/rw/PageHeader';
 import { SectionCard } from '../components/rw/SectionCard';
 import { UpdateSection } from '../components/UpdateSection';
 
-// карточка настроек в стиле Remnawave: иконка в soft-квадрате, заголовок с подписью,
-// содержимое и своя кнопка «Сохранить» в правом нижнем углу
+// карточка настроек в стиле Remnawave: иконка в soft-квадрате, заголовок с подписью
 function SettingsCard({
   icon,
   title,
   subtitle,
   children,
-  onSave,
-  saving,
-  saved,
 }: {
   children: React.ReactNode;
   icon: React.ReactNode;
-  onSave?: () => void;
-  saved?: boolean;
-  saving?: boolean;
   subtitle: string;
   title: string;
 }) {
@@ -53,22 +46,6 @@ function SettingsCard({
         </Group>
       </SectionCard.Section>
       <SectionCard.Section>{children}</SectionCard.Section>
-      {onSave && (
-        <SectionCard.Section>
-          <Group justify="flex-end">
-            <Button
-              color={saved ? 'teal' : 'cyan'}
-              leftSection={saved ? <TbCheck size={16} /> : undefined}
-              loading={saving}
-              onClick={onSave}
-              size="sm"
-              variant="soft"
-            >
-              {saved ? 'Сохранено' : 'Сохранить'}
-            </Button>
-          </Group>
-        </SectionCard.Section>
-      )}
     </SectionCard.Root>
   );
 }
@@ -153,7 +130,7 @@ export function Settings() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['settings'], queryFn: api.settings });
   const [cfg, setCfg] = useState<ScoringConfig | null>(null);
-  const [savedCard, setSavedCard] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (data && !cfg) setCfg(data);
@@ -161,29 +138,29 @@ export function Settings() {
 
   const mutation = useMutation({
     mutationFn: api.saveSettings,
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+    onSuccess: () => {
+      setSaved(true);
+      void qc.invalidateQueries({ queryKey: ['settings'] });
+      setTimeout(() => setSaved(false), 3000);
+    },
   });
 
   if (!cfg) return null;
 
-  // конфиг один, но у каждой карточки своя кнопка — как в настройках Remnawave
-  const saveFrom = (card: string) => {
-    mutation.mutate(cfg, {
-      onSuccess: () => {
-        setSavedCard(card);
-        setTimeout(() => setSavedCard((prev) => (prev === card ? null : prev)), 3000);
-      },
-    });
-  };
-  const cardProps = (card: string) => ({
-    onSave: () => saveFrom(card),
-    saved: savedCard === card,
-    saving: mutation.isPending,
-  });
-
   return (
     <>
       <PageHeader
+        actions={
+          <Button
+            color={saved ? 'teal' : 'cyan'}
+            leftSection={saved ? <TbCheck size={16} /> : undefined}
+            loading={mutation.isPending}
+            onClick={() => mutation.mutate(cfg)}
+            variant="soft"
+          >
+            {saved ? 'Сохранено' : 'Сохранить'}
+          </Button>
+        }
         description="Очки фрода, пороги и окна — применяются со следующего цикла, без перезапуска"
         icon={<TbSettings size={24} />}
         title="Настройки"
@@ -194,7 +171,6 @@ export function Settings() {
         icon={<TbClock size={18} />}
         subtitle="Окна активности и скорость затухания очков"
         title="Окна и затухание"
-        {...cardProps('windows')}
       >
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
@@ -225,7 +201,6 @@ export function Settings() {
         icon={<TbDatabase size={18} />}
         subtitle="Как часто опрашивать панель и сколько хранить сырые данные"
         title="Сбор данных"
-        {...cardProps('collector')}
       >
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
             <NumberInput
@@ -277,7 +252,6 @@ export function Settings() {
         icon={<TbAdjustmentsHorizontal size={18} />}
         subtitle="Сколько очков фрода включают каждый уровень"
         title="Пороги уровней"
-        {...cardProps('thresholds')}
       >
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
@@ -308,7 +282,6 @@ export function Settings() {
         icon={<TbListSearch size={18} />}
         subtitle="В порядке приоритета; бейдж — очки фрода за срабатывание"
         title="Проверки"
-        {...cardProps('checks')}
       >
           <Stack gap="sm">
             <Group justify="space-between" wrap="nowrap">
@@ -516,7 +489,6 @@ export function Settings() {
         icon={<TbBrandTelegram size={18} />}
         subtitle="Алерты в Telegram и кулдаун повторов"
         title="Уведомления"
-        {...cardProps('alerts')}
       >
           <Group justify="space-between" wrap="nowrap">
             <Switch
