@@ -215,6 +215,8 @@ export interface UpdateStatus {
 
 export const updateApi = {
   status: () => json<UpdateStatus>('/api/update/status'),
+  // принудительная проверка — мимо серверного кэша GitHub
+  check: () => json<UpdateStatus>('/api/update/status?force=1'),
   run: () => post<{ ok: boolean }>('/api/update/run', {}),
 };
 

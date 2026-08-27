@@ -495,8 +495,10 @@ export async function startApi(opts: {
   const updateFlagPath = path.resolve('data/update-request');
   let releaseCache: { at: number; latest: string | null; notes: string | null; url: string | null } | null = null;
 
-  app.get('/api/update/status', async () => {
-    if (!releaseCache || Date.now() - releaseCache.at > 30 * 60_000) {
+  app.get('/api/update/status', async (req) => {
+    // кнопка «Проверить» шлёт force=1 и пробивает получасовой кэш
+    const force = (req.query as { force?: string }).force === '1';
+    if (force || !releaseCache || Date.now() - releaseCache.at > 30 * 60_000) {
       try {
         const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
           headers: { accept: 'application/vnd.github+json', 'user-agent': 'remnamatcher' },

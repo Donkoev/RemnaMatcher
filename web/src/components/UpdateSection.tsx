@@ -19,13 +19,30 @@ const STEPS: { key: Phase; label: string }[] = [
  */
 export function UpdateSection() {
   const qc = useQueryClient();
-  const { data, isFetching, refetch } = useQuery({
+  const { data } = useQuery({
     queryKey: ['update-status'],
     queryFn: updateApi.status,
     staleTime: 5 * 60_000,
   });
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkedNow, setCheckedNow] = useState(false);
+
+  // «Проверить» бьёт мимо серверного кэша и даёт видимый результат, даже когда обновлений нет
+  const check = async () => {
+    setChecking(true);
+    try {
+      const s = await updateApi.check();
+      qc.setQueryData(['update-status'], s);
+      setCheckedNow(true);
+      setTimeout(() => setCheckedNow(false), 3000);
+    } catch {
+      // сеть/GitHub недоступны — статус останется прежним
+    } finally {
+      setChecking(false);
+    }
+  };
   const startedAt = useRef(0);
   const targetVersion = useRef<string | null>(null);
 
@@ -103,8 +120,12 @@ export function UpdateSection() {
                   доступна v{data.latest}
                 </Badge>
               ) : (
-                <Text c="dimmed" fz="xs">
-                  {data?.pending ? 'обновление запрошено…' : 'установлена последняя'}
+                <Text c={checkedNow ? 'teal' : 'dimmed'} fz="xs">
+                  {data?.pending
+                    ? 'обновление запрошено…'
+                    : data?.latest === null
+                      ? 'нет данных о релизах — нажми «Проверить»'
+                      : 'установлена последняя'}
                 </Text>
               )}
             </Stack>
@@ -119,15 +140,15 @@ export function UpdateSection() {
               </Button>
             )}
             <Button
-              color="gray"
+              color={checkedNow ? 'teal' : 'gray'}
               fullWidth
-              leftSection={<TbRefresh size={15} />}
-              loading={isFetching}
-              onClick={() => void refetch()}
+              leftSection={checkedNow ? <TbCheck size={15} /> : <TbRefresh size={15} />}
+              loading={checking}
+              onClick={() => void check()}
               size="xs"
               variant="default"
             >
-              Проверить обновления
+              {checkedNow && !data?.updateAvailable ? 'Обновлений нет' : 'Проверить обновления'}
             </Button>
           </Stack>
         </SectionCard.Section>
