@@ -213,8 +213,10 @@ export async function startApi(opts: {
     // IP, ушедший в офлайн дольше окна уникальных, выпадает из счётчика;
     // вернётся онлайн — last_seen обновится и он снова в счёте
     const params: unknown[] = [Date.now() - cfg.uniqueWindowMin * 60_000];
-    // юзеры из белого списка на главный экран не попадают — они живут на своей странице
-    let where = 'NOT EXISTS (SELECT 1 FROM whitelist wl WHERE wl.user_id = s.user_id)';
+    // на главный экран не попадают юзеры из белого списка и отключённые —
+    // они живут на своих страницах («Белый список» и «Наказанные»)
+    let where =
+      "NOT EXISTS (SELECT 1 FROM whitelist wl WHERE wl.user_id = s.user_id) AND (u.status IS NULL OR u.status != 'DISABLED')";
     if (q.level && ['yellow', 'orange', 'red'].includes(q.level)) {
       where += ' AND s.level = ?';
       params.push(q.level);

@@ -50,12 +50,15 @@ export class Actions {
         case 'disable':
           await this.enforcer.disableUser(user.uuid);
           await this.enforcer.dropConnectionsByUser(user.uuid);
+          // статус локально сразу, не дожидаясь синка — отключённый тут же уходит с главной
+          this.db.prepare("UPDATE users SET status = 'DISABLED' WHERE id = ?").run(userId);
           this.markIncidents(userId, 'actioned');
           this.log(userId, action, source, true);
           return { ok: true, message: `⛔ ${user.username} отключён, соединения сброшены.` };
 
         case 'enable':
           await this.enforcer.enableUser(user.uuid);
+          this.db.prepare("UPDATE users SET status = 'ACTIVE' WHERE id = ?").run(userId);
           this.log(userId, action, source, true);
           return { ok: true, message: `✅ ${user.username} снова включён.` };
 
