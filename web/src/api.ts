@@ -204,6 +204,20 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 const post = <T,>(url: string, body: unknown): Promise<T> =>
   json<T>(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+export interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  notes: string | null;
+  url: string | null;
+  pending: boolean;
+}
+
+export const updateApi = {
+  status: () => json<UpdateStatus>('/api/update/status'),
+  run: () => post<{ ok: boolean }>('/api/update/run', {}),
+};
+
 export const authApi = {
   status: () => json<{ setup: boolean; authorized: boolean }>('/api/auth/status'),
   setup: (password: string) => post<{ ok: boolean }>('/api/auth/setup', { password }),

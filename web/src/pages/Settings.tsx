@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi, type ScoringConfig } from '../api';
 import { PageHeader } from '../components/rw/PageHeader';
 import { SectionCard } from '../components/rw/SectionCard';
+import { UpdateSection } from '../components/UpdateSection';
 
 // одинаковая высота под лейбл (до 2 строк) и подсказку — инпуты ряда стоят по одной линии
 const alignedField = {
@@ -457,6 +458,13 @@ export function Settings() {
             Безопасность
           </Text>
           <PasswordSection />
+        </SectionCard.Section>
+
+        <SectionCard.Section>
+          <Text fw={600} fz="sm" mb="sm">
+            Обновление
+          </Text>
+          <UpdateSection />
         </SectionCard.Section>
 
         <SectionCard.Section>

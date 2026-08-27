@@ -124,10 +124,37 @@ EOF
   sed -i "s/127\.0\.0\.1:[0-9]*:[0-9]*/127.0.0.1:${PORT}:${PORT}/" docker-compose.yml
 fi
 
-# --- сборка и запуск ---
+# --- запуск: пробуем готовый образ из ghcr, нет — собираем на месте ---
 say ""
-say "${BOLD}  Собираю и запускаю (первая сборка занимает пару минут)…${NC}"
-docker compose up -d --build
+say "${BOLD}  Запускаю…${NC}"
+if docker compose pull 2>/dev/null; then
+  docker compose up -d
+else
+  say "  ${GRAY}Готового образа нет — собираю локально (пара минут)${NC}"
+  docker compose up -d --build
+fi
+
+# --- хост-хелпер самообновления: кнопка «Обновить» в панели пишет флаг, таймер подбирает ---
+chmod +x "$INSTALL_DIR/update.sh"
+cat > /etc/systemd/system/remnamatcher-updater.service <<EOF
+[Unit]
+Description=RemnaMatcher self-update helper
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_DIR/update.sh
+EOF
+cat > /etc/systemd/system/remnamatcher-updater.timer <<EOF
+[Unit]
+Description=RemnaMatcher update watcher
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=20
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now remnamatcher-updater.timer >/dev/null 2>&1
+ok "Самообновление включено (кнопка «Обновить» в панели)"
 
 PORT_NOW=$(grep -oP 'PORT=\K[0-9]+' "$ENV_FILE" || echo 3300)
 say ""

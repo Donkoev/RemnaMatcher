@@ -13,6 +13,22 @@ import { bus } from '../events.js';
 import { DEFAULT_CONFIG, type ScoringConfig } from '../scoring/rules.js';
 import { Auth, hashPassword, verifyPassword } from './auth.js';
 
+const GITHUB_REPO = 'Donkoev/RemnaMatcher';
+const VERSION: string = (
+  JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
+
+/** сравнение версий x.y.z: положительное — a новее b */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 export function loadScoringConfig(db: Database.Database): ScoringConfig {
   const row = db.prepare<[string], { value: string }>('SELECT value FROM settings WHERE key = ?').get('scoring');
   if (!row) return DEFAULT_CONFIG;
@@ -471,6 +487,51 @@ export async function startApi(opts: {
       .header('Cache-Control', 'public, max-age=604800')
       .type('image/png')
       .send(fs.readFileSync(file));
+  });
+
+  // --- Самообновление ---
+  // Панель сама себя не пересобирает: POST /api/update/run пишет файл-флаг в data,
+  // а хост-хелпер (update.sh по systemd-таймеру) его подбирает и делает pull + up.
+  const updateFlagPath = path.resolve('data/update-request');
+  let releaseCache: { at: number; latest: string | null; notes: string | null; url: string | null } | null = null;
+
+  app.get('/api/update/status', async () => {
+    if (!releaseCache || Date.now() - releaseCache.at > 30 * 60_000) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+          headers: { accept: 'application/vnd.github+json', 'user-agent': 'remnamatcher' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          const j = (await res.json()) as { tag_name?: string; body?: string; html_url?: string };
+          releaseCache = {
+            at: Date.now(),
+            latest: (j.tag_name ?? '').replace(/^v/, '') || null,
+            notes: j.body ?? null,
+            url: j.html_url ?? null,
+          };
+        } else {
+          releaseCache = { at: Date.now(), latest: null, notes: null, url: null };
+        }
+      } catch {
+        releaseCache = { at: Date.now(), latest: null, notes: null, url: null };
+      }
+    }
+    return {
+      current: VERSION,
+      latest: releaseCache.latest,
+      updateAvailable: releaseCache.latest !== null && compareVersions(releaseCache.latest, VERSION) > 0,
+      notes: releaseCache.notes,
+      url: releaseCache.url,
+      pending: fs.existsSync(updateFlagPath),
+    };
+  });
+
+  app.post('/api/update/run', (req, reply) => {
+    if (fs.existsSync(updateFlagPath)) return reply.code(409).send({ error: 'обновление уже запрошено' });
+    fs.writeFileSync(updateFlagPath, JSON.stringify({ requestedAt: Date.now(), from: VERSION }));
+    releaseCache = null;
+    return { ok: true };
   });
 
   app.get('/api/settings', () => loadScoringConfig(db));

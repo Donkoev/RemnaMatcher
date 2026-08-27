@@ -1,7 +1,7 @@
 services:
   remnamatcher:
     build: .
-    image: remnamatcher:latest
+    image: ghcr.io/donkoev/remnamatcher:latest
     container_name: remnamatcher
     restart: unless-stopped
     env_file: server/.env
