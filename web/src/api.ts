@@ -100,6 +100,9 @@ export interface UserDetail {
     sub_url: string | null;
     online_at: number | null;
     expire_at: number | null;
+    tag: string | null;
+    // поле «Описание» из панели — админ хранит там инфо о юзере
+    description: string | null;
   };
   whitelisted: boolean;
   score: {

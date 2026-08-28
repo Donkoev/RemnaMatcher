@@ -122,6 +122,7 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
       usedTrafficBytes: randInt(1, 80) * 1024 * 1024 * 1024,
       onlineAt: new Date().toISOString(),
       expireAt: new Date(Date.now() + 30 * 864e5).toISOString(),
+      description: id % 3 === 0 ? `name: Тест ${id}\nusername: tg_user_${id}` : null,
     };
   }
 

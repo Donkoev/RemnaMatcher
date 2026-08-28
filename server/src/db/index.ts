@@ -15,6 +15,7 @@ export function openDb(dbPath: string): Database.Database {
     'ALTER TABLE users ADD COLUMN hwid_limit INTEGER',
     'ALTER TABLE ip_meta ADD COLUMN refined INTEGER NOT NULL DEFAULT 0',
     "ALTER TABLE score_state ADD COLUMN signals_seen TEXT NOT NULL DEFAULT '{}'",
+    'ALTER TABLE users ADD COLUMN description TEXT',
   ]) {
     try {
       db.exec(stmt);

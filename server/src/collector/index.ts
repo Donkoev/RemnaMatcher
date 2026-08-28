@@ -143,14 +143,14 @@ export class Collector {
   private async syncUsers(now: number): Promise<void> {
     const users = await this.remna.getAllUsers();
     const upsertUser = this.db.prepare(
-      `INSERT INTO users (id, uuid, short_uuid, username, status, telegram_id, email, tag, used_traffic, traffic_limit, hwid_limit, sub_url, online_at, expire_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, uuid, short_uuid, username, status, telegram_id, email, tag, used_traffic, traffic_limit, hwid_limit, sub_url, online_at, expire_at, description, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          uuid = excluded.uuid, short_uuid = excluded.short_uuid, username = excluded.username,
          status = excluded.status, telegram_id = excluded.telegram_id, email = excluded.email,
          tag = excluded.tag, used_traffic = excluded.used_traffic, traffic_limit = excluded.traffic_limit,
          hwid_limit = excluded.hwid_limit, sub_url = excluded.sub_url, online_at = excluded.online_at,
-         expire_at = excluded.expire_at, synced_at = excluded.synced_at`,
+         expire_at = excluded.expire_at, description = excluded.description, synced_at = excluded.synced_at`,
     );
     const insertSnapshot = this.db.prepare(
       'INSERT OR IGNORE INTO traffic_snapshots (user_id, ts, used) VALUES (?, ?, ?)',
@@ -172,6 +172,7 @@ export class Collector {
           u.subscriptionUrl,
           u.onlineAt ? Date.parse(u.onlineAt) : null,
           u.expireAt ? Date.parse(u.expireAt) : null,
+          u.description,
           now,
         );
         insertSnapshot.run(u.id, now, u.usedTrafficBytes);

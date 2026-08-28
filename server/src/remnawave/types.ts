@@ -28,6 +28,8 @@ export interface RemnaUser {
   subscriptionUrl: string | null;
   onlineAt: string | null;
   expireAt: string | null;
+  /** поле «Описание» из панели — админы хранят там инфо о юзере (имя, TG и т.п.) */
+  description: string | null;
 }
 
 export interface UserIps {

@@ -74,6 +74,7 @@ export class HttpRemnaReader implements RemnaReader {
           subscriptionUrl: u.subscriptionUrl ?? null,
           usedTrafficBytes: u.userTraffic?.usedTrafficBytes ?? 0,
           onlineAt: u.userTraffic?.onlineAt ?? null,
+          description: u.description ?? null,
         });
       }
       if (users.length >= data.response.total || data.response.users.length === 0) break;

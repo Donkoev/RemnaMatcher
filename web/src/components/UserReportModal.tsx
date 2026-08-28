@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Divider,
+  Drawer,
   Grid,
   Group,
   LoadingOverlay,
@@ -35,11 +36,13 @@ import {
   TbClockCheck,
   TbClockExclamation,
   TbClockPause,
+  TbCalendarTime,
   TbDevices,
   TbDotsVertical,
   TbExternalLink,
   TbFingerprint,
   TbHistory,
+  TbNotes,
   TbNetwork,
   TbSitemap,
   TbSortAscending,
@@ -274,6 +277,41 @@ const PLATFORM_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   linux: TbDeviceDesktop,
 };
 
+/** Дата истечения подписки: дата + бейдж «сколько осталось»; 2098+ считаем бессрочной */
+function ExpireRow({ expireAt }: { expireAt: number | null }) {
+  if (!expireAt) {
+    return (
+      <Group gap="sm" wrap="nowrap">
+        <TbCalendarTime color="var(--mantine-color-dark-2)" size={18} />
+        <Text c="dimmed" fz="sm">
+          Дата истечения не задана
+        </Text>
+      </Group>
+    );
+  }
+  const endless = new Date(expireAt).getFullYear() >= 2098;
+  const daysLeft = Math.ceil((expireAt - Date.now()) / 864e5);
+  const expired = daysLeft < 0;
+  const color = endless ? 'teal' : expired ? 'red' : daysLeft <= 7 ? 'orange' : 'teal';
+  return (
+    <Group gap="sm" wrap="nowrap">
+      <TbCalendarTime color={`var(--mantine-color-${color}-5)`} size={18} style={{ flexShrink: 0 }} />
+      <Text fz="sm">
+        {endless ? 'Бессрочная подписка' : `Истекает ${new Date(expireAt).toLocaleDateString('ru-RU')}`}
+      </Text>
+      {!endless && (
+        <Badge color={color} size="sm" variant="soft">
+          {expired
+            ? 'истекла'
+            : daysLeft === 0
+              ? 'сегодня'
+              : `${daysLeft} ${plural(daysLeft, ['день', 'дня', 'дней'])}`}
+        </Badge>
+      )}
+    </Group>
+  );
+}
+
 /**
  * Карточка HWID-устройства в стиле панели Remnawave: иконка платформы
  * в soft-квадрате, номер и модель, копируемое поле HWID, пересечения и метка ЧС.
@@ -374,6 +412,7 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
   const isMobile = useMediaQuery('(max-width: 48em)');
   const [confirm, setConfirm] = useState<ActionDef | null>(null);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [devicesOpen, setDevicesOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['user', userId],
@@ -407,6 +446,7 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
     setContentReady(false);
     setSortChain(['ip_subnet', 'recent']);
     setOnlyActive(true);
+    setDevicesOpen(false);
     if (userId === null) return;
     const t = setTimeout(() => setContentReady(true), 30);
     return () => clearTimeout(t);
@@ -687,51 +727,57 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
               </SectionCard.Root>
             </Grid.Col>
 
-            {data.hwid.count !== null && (
-              <Grid.Col span={{ base: 12, md: 6 }}>
-                <SectionCard.Root gap="sm" h="100%">
-                  <SectionCard.Section>
-                    <Group justify="space-between" wrap="nowrap">
-                      <BlockHeader color="teal" icon={<TbDevices size={18} />} title="Устройства HWID" />
-                      {/* лимит 0 в Remnawave означает «не задан» */}
-                      <Tooltip
-                        label={data.hwid.limit ? 'Занято устройств из HWID-лимита' : 'HWID-лимит не задан'}
-                        radius="md"
-                      >
-                        <Badge
-                          color={data.hwid.limit && data.hwid.count >= data.hwid.limit ? 'red' : 'teal'}
-                          size="lg"
-                          style={{ cursor: 'help' }}
-                          variant="soft"
-                        >
-                          {data.hwid.count}
-                          {data.hwid.limit ? ` / ${data.hwid.limit}` : ''}
-                        </Badge>
-                      </Tooltip>
-                    </Group>
-                    {!!data.hwid.limit && (
-                      <Progress
-                        color={data.hwid.count >= data.hwid.limit ? 'red' : 'teal'}
-                        mt={10}
-                        size="sm"
-                        value={Math.min(100, (data.hwid.count / data.hwid.limit) * 100)}
-                      />
+            <Grid.Col span={{ base: 12, md: 6 }}>
+              <SectionCard.Root gap="sm" h="100%">
+                <SectionCard.Section>
+                  <Group justify="space-between" wrap="nowrap">
+                    <BlockHeader color="orange" icon={<TbNotes size={18} />} title="Описание" />
+                    {data.user.tag && (
+                      <Badge color="gray" size="sm" variant="outline">
+                        {data.user.tag}
+                      </Badge>
                     )}
-                  </SectionCard.Section>
-                  {data.hwid.devices.length > 0 && (
-                    <SectionCard.Section style={{ flex: 1, minHeight: 0 }}>
-                      <ScrollArea.Autosize mah={240}>
-                        <Stack gap={8}>
-                          {data.hwid.devices.map((d, i) => (
-                            <DeviceCard device={d} index={i} key={d.hwid} />
-                          ))}
-                        </Stack>
+                  </Group>
+                </SectionCard.Section>
+                <SectionCard.Section style={{ flex: 1, minHeight: 0 }}>
+                  <Stack gap="sm">
+                    <ExpireRow expireAt={data.user.expire_at} />
+                    {data.user.description ? (
+                      <ScrollArea.Autosize mah={110}>
+                        <Text fz="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {data.user.description}
+                        </Text>
                       </ScrollArea.Autosize>
-                    </SectionCard.Section>
-                  )}
-                </SectionCard.Root>
-              </Grid.Col>
-            )}
+                    ) : (
+                      <Text c="dimmed" fz="sm">
+                        Описание в панели пустое
+                      </Text>
+                    )}
+                  </Stack>
+                </SectionCard.Section>
+                <SectionCard.Section>
+                  <Button
+                    fullWidth
+                    justify="space-between"
+                    leftSection={<TbDevices size={16} />}
+                    onClick={() => setDevicesOpen(true)}
+                    rightSection={
+                      <Badge
+                        color={data.hwid.limit && (data.hwid.count ?? 0) >= data.hwid.limit ? 'red' : 'teal'}
+                        size="sm"
+                        variant="soft"
+                      >
+                        {data.hwid.count ?? '—'}
+                        {data.hwid.limit ? ` / ${data.hwid.limit}` : ''}
+                      </Badge>
+                    }
+                    variant="default"
+                  >
+                    Устройства HWID
+                  </Button>
+                </SectionCard.Section>
+              </SectionCard.Root>
+            </Grid.Col>
 
             {(data.incidents.length > 0 || data.log.length > 0) && (
               <Grid.Col span={{ base: 12, md: 6 }}>
@@ -1058,6 +1104,54 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
           </Group>
         </Stack>
       )}
+
+      {/* выдвижная панель устройств — как drawer «Устройства HWID» в Remnawave */}
+      <Drawer
+        onClose={() => setDevicesOpen(false)}
+        opened={devicesOpen}
+        position="right"
+        size={420}
+        title={
+          <Group gap="sm" wrap="nowrap">
+            <ThemeIcon color="indigo" size="lg" variant="soft">
+              <TbDevices size={18} />
+            </ThemeIcon>
+            <Text fw={700} fz="lg">
+              Устройства HWID
+            </Text>
+            {data && (
+              <Badge
+                color={data.hwid.limit && (data.hwid.count ?? 0) >= data.hwid.limit ? 'red' : 'teal'}
+                size="lg"
+                variant="soft"
+              >
+                {data.hwid.count ?? '—'}
+                {data.hwid.limit ? ` / ${data.hwid.limit}` : ''}
+              </Badge>
+            )}
+          </Group>
+        }
+        zIndex={300}
+      >
+        {data && (
+          <Stack gap="sm" pt="xs">
+            {!!data.hwid.limit && (
+              <Progress
+                color={(data.hwid.count ?? 0) >= data.hwid.limit ? 'red' : 'teal'}
+                size="sm"
+                value={Math.min(100, ((data.hwid.count ?? 0) / data.hwid.limit) * 100)}
+              />
+            )}
+            {data.hwid.devices.length === 0 ? (
+              <Text c="dimmed" fz="sm" py="lg" ta="center">
+                Устройств в зеркале пока нет — появятся после ближайшей синхронизации
+              </Text>
+            ) : (
+              data.hwid.devices.map((d, i) => <DeviceCard device={d} index={i} key={d.hwid} />)
+            )}
+          </Stack>
+        )}
+      </Drawer>
 
       <Modal onClose={() => setConfirm(null)} opened={confirm !== null} title={confirm?.label} zIndex={300}>
         <Text mb="lg" size="sm">
