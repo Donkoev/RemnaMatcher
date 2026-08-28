@@ -815,12 +815,13 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
                     <BlockHeader color="violet" icon={<TbHistory size={18} />} title="История" />
                   </SectionCard.Section>
                   <SectionCard.Section>
-                    <ScrollArea.Autosize mah={130}>
-                      <Stack gap={6}>
+                    {/* строки фикс-высоты 24 + gap 8, окно кратно шагу — обрезка всегда по границе строки */}
+                    <ScrollArea.Autosize mah={152}>
+                      <Stack gap={8}>
                         {data.incidents.map((inc) => (
-                          <Group gap="sm" key={`i${inc.id}`} wrap="nowrap">
+                          <Group gap="sm" h={24} key={`i${inc.id}`} wrap="nowrap">
                             <LevelBadge level={inc.level} score={inc.score} size="sm" />
-                            <Text c="dimmed" fz="sm">
+                            <Text c="dimmed" fz="sm" style={{ whiteSpace: 'nowrap' }}>
                               {new Date(inc.createdAt).toLocaleString('ru-RU')}
                             </Text>
                             <Badge color={inc.status === 'open' ? 'red' : 'gray'} size="sm" variant="soft">
@@ -829,11 +830,13 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
                           </Group>
                         ))}
                         {data.log.map((l, i) => (
-                          <Text c={l.ok ? 'dimmed' : 'red'} fz="sm" key={`l${i}`}>
-                            {new Date(l.ts).toLocaleString('ru-RU')} · {ACTION_LABELS[l.action] ?? l.action} ·{' '}
-                            {l.source === 'telegram' ? 'Telegram' : 'веб'}
-                            {l.error ? ` · ${l.error}` : ''}
-                          </Text>
+                          <Group gap="sm" h={24} key={`l${i}`} wrap="nowrap">
+                            <Text c={l.ok ? 'dimmed' : 'red'} fz="sm" truncate>
+                              {new Date(l.ts).toLocaleString('ru-RU')} · {ACTION_LABELS[l.action] ?? l.action} ·{' '}
+                              {l.source === 'telegram' ? 'Telegram' : 'веб'}
+                              {l.error ? ` · ${l.error}` : ''}
+                            </Text>
+                          </Group>
                         ))}
                       </Stack>
                     </ScrollArea.Autosize>
