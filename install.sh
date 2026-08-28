@@ -88,15 +88,35 @@ else
   say "${BOLD}  Подключение к панели Remnawave${NC}"
   say "  ${GRAY}Это адрес существующей панели Remnawave, откуда берутся данные —${NC}"
   say "  ${GRAY}НЕ домен, на котором будет висеть сам RemnaMatcher (его спросим позже).${NC}"
-  ask "URL панели Remnawave (https://panel.example.com)" PANEL_URL
-  PANEL_URL="${PANEL_URL%/}"
-  case "$PANEL_URL" in
-    http://*|https://*) ;;
-    *) PANEL_URL="https://${PANEL_URL}"; say "  ${GRAY}Добавил https:// → ${PANEL_URL}${NC}" ;;
-  esac
-  ask "API-токен панели (создай отдельный под RemnaMatcher)" PANEL_TOKEN
-  say "  ${GRAY}Если панель прикрыта nginx-секретом в ссылке (?key=value) — введи его. У большинства его нет.${NC}"
-  echo -ne "  ${CYAN}?${NC} Секрет nginx-защиты key=value ${DIM}[Enter — пропустить]${NC}: "; read -r PANEL_SECRET
+  while true; do
+    ask "URL панели Remnawave (https://panel.example.com)" PANEL_URL
+    PANEL_URL="${PANEL_URL%/}"
+    case "$PANEL_URL" in
+      http://*|https://*) ;;
+      *) PANEL_URL="https://${PANEL_URL}"; say "  ${GRAY}Добавил https:// → ${PANEL_URL}${NC}" ;;
+    esac
+    ask "API-токен панели (создай отдельный под RemnaMatcher)" PANEL_TOKEN
+    say "  ${GRAY}Если панель прикрыта nginx-секретом в ссылке (?key=value) — введи его. У большинства его нет.${NC}"
+    echo -ne "  ${CYAN}?${NC} Секрет nginx-защиты key=value ${DIM}[Enter — пропустить]${NC}: "; read -r PANEL_SECRET
+
+    # проверяем доступ ДО записи конфига — неверный URL/токен ловится сразу, а не 502-й после установки
+    say "  ${GRAY}Проверяю подключение к панели…${NC}"
+    CHECK_URL="${PANEL_URL}/api/users?size=1"
+    [ -n "$PANEL_SECRET" ] && CHECK_URL="${CHECK_URL}&${PANEL_SECRET}"
+    HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+      -H "Authorization: Bearer ${PANEL_TOKEN}" \
+      ${PANEL_SECRET:+-H "Cookie: ${PANEL_SECRET}"} \
+      "$CHECK_URL" || echo 000)
+    if [ "$HTTP_CODE" = "200" ]; then
+      ok "Панель отвечает, токен рабочий"
+      break
+    fi
+    warn "Панель не ответила как надо (HTTP ${HTTP_CODE}). Частые причины: неверный URL, просроченный токен, не тот секрет."
+    if ! confirm "Ввести данные панели заново?"; then
+      confirm "Продолжить установку с этими данными (на свой риск)?" "N" && break
+      die "установка прервана — проверь данные панели и запусти скрипт снова"
+    fi
+  done
 
   say ""
   say "${BOLD}  Telegram-уведомления${NC}"

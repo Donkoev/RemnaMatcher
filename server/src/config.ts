@@ -24,7 +24,22 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
-export const env: Env = EnvSchema.parse(process.env);
+function parseEnv(): Env {
+  const res = EnvSchema.safeParse(process.env);
+  if (!res.success) {
+    console.error('[config] .env содержит ошибки — исправь и перезапусти:');
+    for (const issue of res.error.issues) {
+      console.error(`  - ${issue.path.join('.')}: ${issue.message}`);
+      if (issue.path[0] === 'REMNAWAVE_URL') {
+        console.error('    подсказка: нужен полный URL панели Remnawave, например https://panel.example.com');
+      }
+    }
+    process.exit(1);
+  }
+  return res.data;
+}
+
+export const env: Env = parseEnv();
 
 export function assertLiveConfig(e: Env): asserts e is Env & { REMNAWAVE_URL: string; REMNAWAVE_TOKEN: string } {
   if (!e.REMNAWAVE_URL || !e.REMNAWAVE_TOKEN) {
