@@ -103,17 +103,21 @@ else
   ask "Порт веб-панели" PORT "3300"
 
   cat > "$ENV_FILE" <<EOF
-MODE=live
-PORT=${PORT}
+# --- Режим ---
+MODE=live                                    # mock — сгенерированные данные без панели; live — боевой режим
+PORT=${PORT}                                 # порт веб-панели и API
 
-REMNAWAVE_URL=${PANEL_URL}
-REMNAWAVE_TOKEN=${PANEL_TOKEN}
-REMNAWAVE_SECRET=${PANEL_SECRET}
+# --- Remnawave ---
+REMNAWAVE_URL=${PANEL_URL}                   # URL панели (без слэша на конце)
+REMNAWAVE_TOKEN=${PANEL_TOKEN}               # API-токен из панели
+REMNAWAVE_SECRET=${PANEL_SECRET}             # секрет nginx-защиты панели key=value; пусто — не используется
 
-IPINFO_TOKEN=${IPINFO}
+# --- Сервисы ---
+IPINFO_TOKEN=${IPINFO}                       # токен ipinfo.io для точных городов; пусто — анонимный режим
 
-TELEGRAM_BOT_TOKEN=${TG_TOKEN}
-TELEGRAM_ADMIN_CHAT_ID=${TG_CHAT}
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN=${TG_TOKEN}               # токен бота от @BotFather
+TELEGRAM_ADMIN_CHAT_ID=${TG_CHAT}            # chat id администратора
 
 # Периоды опроса/синка и хранение данных правятся в панели: Настройки -> Сбор данных
 EOF
