@@ -38,6 +38,8 @@ export interface ScoringConfig {
   trafficRateBps: number;
   /** не слать повторное уведомление по юзеру чаще, чем раз в N часов (если уровень не вырос) */
   alertCooldownHours: number;
+  /** автобан: устройство из HWID-блэклиста всплыло в живой подписке — отключить её */
+  hwidAutobanEnabled: boolean;
   /** слать ли уведомления в Telegram вообще */
   telegramAlertsEnabled: boolean;
   /** настройки сигналов: подписку легально могут делить 5–10 человек, поэтому пороги сдвигаемые */
@@ -69,6 +71,7 @@ export const DEFAULT_CONFIG: ScoringConfig = {
   decayHalfLifeHours: 6,
   trafficRateBps: 3 * 1024 * 1024,
   alertCooldownHours: 6,
+  hwidAutobanEnabled: true,
   telegramAlertsEnabled: true,
   signals: {
     multiAsn: { enabled: true, minAsns: 4 },

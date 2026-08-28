@@ -1,4 +1,4 @@
-import type { NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport } from './types.js';
+import type { HwidDevice, NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport } from './types.js';
 
 interface HttpOpts {
   baseUrl: string;
@@ -79,6 +79,15 @@ export class HttpRemnaReader implements RemnaReader {
       if (users.length >= data.response.total || data.response.users.length === 0) break;
     }
     return users;
+  }
+
+  async getAllHwidDevices(start: number, size: number): Promise<{ devices: HwidDevice[]; total: number }> {
+    const data = await api<{ response: { devices: HwidDevice[]; total: number } }>(
+      this.opts,
+      'GET',
+      `/api/hwid/devices?start=${start}&size=${size}`,
+    );
+    return data.response;
   }
 
   async getHwidDeviceCount(userUuid: string): Promise<number | null> {

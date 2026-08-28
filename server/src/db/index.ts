@@ -22,6 +22,34 @@ export function openDb(dbPath: string): Database.Database {
       // колонка уже есть
     }
   }
+
+  // устройства (HWID) и чёрный список — добавлены позже основной схемы
+  db.exec(/* sql */ `
+    -- зеркало устройств панели С ИСТОРИЕЙ: удалённые из панели помечаются deleted_at,
+    -- но остаются — по ним видно, в каких подписках hwid светился раньше
+    CREATE TABLE IF NOT EXISTS hwid_devices (
+      hwid         TEXT NOT NULL,
+      user_id      INTEGER NOT NULL,
+      platform     TEXT,
+      os_version   TEXT,
+      device_model TEXT,
+      user_agent   TEXT,
+      first_seen   INTEGER NOT NULL,
+      last_seen    INTEGER NOT NULL,
+      deleted_at   INTEGER,
+      PRIMARY KEY (hwid, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_hwid_devices_user ON hwid_devices(user_id);
+    CREATE INDEX IF NOT EXISTS idx_hwid_devices_hwid ON hwid_devices(hwid);
+
+    -- чёрный список HWID: появление такого устройства в любой подписке = автобан
+    CREATE TABLE IF NOT EXISTS hwid_blacklist (
+      hwid           TEXT PRIMARY KEY,
+      reason         TEXT,
+      source_user_id INTEGER,
+      added_at       INTEGER NOT NULL
+    );
+  `);
   return db;
 }
 

@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
 import type { RemnaEnforcer } from './remnawave/types.js';
 
-export type ActionName = 'revoke' | 'disable' | 'enable' | 'drop' | 'whitelist' | 'unwhitelist';
+export type ActionName = 'revoke' | 'disable' | 'enable' | 'drop' | 'whitelist' | 'unwhitelist' | 'hwid_ban';
+
+export type ActionSource = 'telegram' | 'web' | 'hwid-autoban';
 
 export interface ActionResult {
   ok: boolean;
@@ -34,7 +36,7 @@ export class Actions {
     this.db.prepare("UPDATE incidents SET status = ? WHERE user_id = ? AND status = 'open'").run(status, userId);
   }
 
-  async run(action: ActionName, userId: number, source: 'telegram' | 'web'): Promise<ActionResult> {
+  async run(action: ActionName, userId: number, source: ActionSource): Promise<ActionResult> {
     const user = this.userByid(userId);
     if (!user) return { ok: false, message: `Юзер id ${userId} не найден в локальной базе` };
 
@@ -79,6 +81,32 @@ export class Actions {
           this.db.prepare('DELETE FROM whitelist WHERE user_id = ?').run(userId);
           this.log(userId, action, source, true);
           return { ok: true, message: `${user.username} убран из белого списка.` };
+
+        case 'hwid_ban': {
+          // все живые устройства юзера — в чёрный список, сама подписка отключается
+          const devices = this.db
+            .prepare<[number], { hwid: string }>(
+              'SELECT hwid FROM hwid_devices WHERE user_id = ? AND deleted_at IS NULL',
+            )
+            .all(userId);
+          if (devices.length === 0) {
+            this.log(userId, action, source, false, 'нет устройств');
+            return { ok: false, message: `У ${user.username} нет живых HWID-устройств — банить нечего.` };
+          }
+          const insert = this.db.prepare(
+            'INSERT OR IGNORE INTO hwid_blacklist (hwid, reason, source_user_id, added_at) VALUES (?, ?, ?, ?)',
+          );
+          for (const d of devices) insert.run(d.hwid, `устройства ${user.username}`, userId, Date.now());
+          await this.enforcer.disableUser(user.uuid);
+          await this.enforcer.dropConnectionsByUser(user.uuid);
+          this.db.prepare("UPDATE users SET status = 'DISABLED' WHERE id = ?").run(userId);
+          this.markIncidents(userId, 'actioned');
+          this.log(userId, action, source, true);
+          return {
+            ok: true,
+            message: `🚫 ${user.username}: ${devices.length} устройств в чёрном списке, подписка отключена. Всплывут в другой подписке — автобан.`,
+          };
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type { RemnaReader } from '../remnawave/types.js';
 import type { ScoringEngine } from '../scoring/engine.js';
 import type { ScoringConfig } from '../scoring/rules.js';
+import type { Actions } from '../actions.js';
 import { bus } from '../events.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -21,6 +22,8 @@ export class Collector {
     private engine: ScoringEngine,
     // интервалы и ретеншн правятся в панели на лету — читаем конфиг каждый цикл
     private getConfig: () => ScoringConfig,
+    // только для автобана по HWID-блэклисту
+    private actions: Actions,
   ) {}
 
   start(): void {
@@ -51,6 +54,11 @@ export class Collector {
 
     if (now - this.lastUserSync > cc.userSyncIntervalSec * 1000) {
       await this.syncUsers(now);
+      try {
+        await this.syncHwidDevices(now);
+      } catch (err) {
+        console.error('[collector] hwid sync:', err instanceof Error ? err.message : err);
+      }
       this.lastUserSync = now;
     }
 
@@ -171,6 +179,88 @@ export class Collector {
     });
     tx();
     console.log(`[collector] user sync: ${users.length} users`);
+  }
+
+  /**
+   * Зеркало устройств панели с историей: живые обновляются, пропавшие помечаются
+   * deleted_at (но не удаляются — по ним видно, где hwid светился раньше).
+   * После синка — автобан: устройство из чёрного списка в активной подписке.
+   */
+  private async syncHwidDevices(now: number): Promise<void> {
+    const pageSize = 500;
+    const seen = new Set<string>();
+    // панель отдаёт uuid юзера — маппим на наш числовой id
+    const uuidToId = new Map(
+      this.db.prepare<[], { id: number; uuid: string }>('SELECT id, uuid FROM users').all().map((u) => [u.uuid, u.id]),
+    );
+    const upsert = this.db.prepare(
+      `INSERT INTO hwid_devices (hwid, user_id, platform, os_version, device_model, user_agent, first_seen, last_seen, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+       ON CONFLICT(hwid, user_id) DO UPDATE SET
+         platform = excluded.platform, os_version = excluded.os_version,
+         device_model = excluded.device_model, user_agent = excluded.user_agent,
+         last_seen = excluded.last_seen, deleted_at = NULL`,
+    );
+
+    let fetched = 0;
+    for (let start = 0; ; start += pageSize) {
+      const page = await this.remna.getAllHwidDevices(start, pageSize);
+      const tx = this.db.transaction(() => {
+        for (const d of page.devices) {
+          const userId = uuidToId.get(d.userUuid);
+          if (userId === undefined) continue; // юзер ещё не в справочнике — доедет со следующим синком
+          upsert.run(d.hwid, userId, d.platform, d.osVersion, d.deviceModel, d.userAgent, now, now);
+          seen.add(`${d.hwid} ${userId}`);
+        }
+      });
+      tx();
+      fetched += page.devices.length;
+      if (fetched >= page.total || page.devices.length === 0) break;
+    }
+
+    // пропавшие из панели устройства — в историю
+    const active = this.db
+      .prepare<[], { hwid: string; user_id: number }>('SELECT hwid, user_id FROM hwid_devices WHERE deleted_at IS NULL')
+      .all();
+    const markDeleted = this.db.prepare('UPDATE hwid_devices SET deleted_at = ? WHERE hwid = ? AND user_id = ?');
+    const tx = this.db.transaction(() => {
+      for (const row of active) {
+        if (!seen.has(`${row.hwid} ${row.user_id}`)) markDeleted.run(now, row.hwid, row.user_id);
+      }
+    });
+    tx();
+
+    await this.enforceHwidBlacklist();
+  }
+
+  /** Автобан: блэклистнутый hwid всплыл в живой подписке — отключаем её (если включено в настройках) */
+  private async enforceHwidBlacklist(): Promise<void> {
+    if (!this.getConfig().hwidAutobanEnabled) return;
+    const hits = this.db
+      .prepare<[], { user_id: number; username: string; hwid: string; source_user_id: number | null }>(
+        `SELECT DISTINCT d.user_id, u.username, d.hwid, b.source_user_id
+         FROM hwid_devices d
+         JOIN hwid_blacklist b ON b.hwid = d.hwid
+         JOIN users u ON u.id = d.user_id
+         WHERE d.deleted_at IS NULL
+           AND u.status != 'DISABLED'
+           AND NOT EXISTS (SELECT 1 FROM whitelist w WHERE w.user_id = d.user_id)`,
+      )
+      .all();
+    for (const hit of hits) {
+      const res = await this.actions.run('disable', hit.user_id, 'hwid-autoban');
+      console.log(`[hwid] автобан ${hit.username} (hwid ${hit.hwid.slice(0, 16)}…): ${res.ok ? 'ok' : res.message}`);
+      const src = hit.source_user_id
+        ? (this.db.prepare<[number], { username: string }>('SELECT username FROM users WHERE id = ?').get(hit.source_user_id)?.username ?? null)
+        : null;
+      bus.emit('hwid_autoban', {
+        userId: hit.user_id,
+        username: hit.username,
+        hwid: hit.hwid,
+        sourceUsername: src,
+        ok: res.ok,
+      });
+    }
   }
 
   private retention(retentionHours: number): void {

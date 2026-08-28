@@ -25,7 +25,11 @@ import {
 import {
   TbArrowsSort,
   TbBan,
+  TbBrandAndroid,
+  TbBrandApple,
+  TbBrandWindows,
   TbBuilding,
+  TbDeviceDesktop,
   TbChartBar,
   TbCheck,
   TbClockCheck,
@@ -46,7 +50,20 @@ import {
 import { PiUserCircle, PiWarningDuotone } from 'react-icons/pi';
 import { useMediaQuery } from '@mantine/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, cleanCity, flagEmoji, formatBytes, plural, timeAgo, type ActionName, type UserIp } from '../api';
+import {
+  api,
+  cleanCity,
+  flagEmoji,
+  formatBytes,
+  hwidApi,
+  plural,
+  timeAgo,
+  type ActionName,
+  type HwidDeviceInfo,
+  type HwidLookupEntry,
+  type UserIp,
+} from '../api';
+import { useUserModal } from '../userModal';
 import { AsnMark } from './AsnMark';
 import { LevelBadge } from './LevelBadge';
 import { SectionCard } from './rw/SectionCard';
@@ -248,6 +265,91 @@ const getLastSeenIndicator = (lastSeen: number) => {
   return { color: 'var(--mantine-color-red-6)', Icon: TbClockExclamation };
 };
 
+const PLATFORM_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
+  ios: TbBrandApple,
+  macos: TbBrandApple,
+  android: TbBrandAndroid,
+  windows: TbBrandWindows,
+  linux: TbDeviceDesktop,
+};
+
+/** Строка HWID-устройства: платформа, модель, hwid, пересечения с другими подписками и метка ЧС */
+function DeviceRow({ device }: { device: HwidDeviceInfo }) {
+  const { openUser } = useUserModal();
+  const [shared, setShared] = useState<HwidLookupEntry[] | null>(null);
+  const Icon = PLATFORM_ICONS[(device.platform ?? '').toLowerCase()] ?? TbDevices;
+  return (
+    <div>
+      <Group gap="xs" wrap="nowrap">
+        <ThemeIcon color={device.blacklisted ? 'red' : 'gray'} size="md" variant="soft">
+          <Icon size={15} />
+        </ThemeIcon>
+        <Stack gap={0} miw={0} style={{ flex: 1 }}>
+          <Group gap={6} wrap="nowrap">
+            <Text fw={600} fz="sm" truncate>
+              {device.deviceModel ?? device.platform ?? 'устройство'}
+            </Text>
+            {device.osVersion && (
+              <Text c="dimmed" fz="xs" style={{ flexShrink: 0 }}>
+                {device.osVersion}
+              </Text>
+            )}
+          </Group>
+          <Text c="dimmed" className="mono" fz={11} truncate>
+            {device.hwid}
+          </Text>
+        </Stack>
+        <Tooltip label={`Активность: ${timeAgo(device.lastSeen)}`} radius="md">
+          <Text c="dimmed" fz="xs" style={{ cursor: 'help', flexShrink: 0 }}>
+            {timeAgo(device.lastSeen)}
+          </Text>
+        </Tooltip>
+        {device.blacklisted && (
+          <Badge color="red" size="sm" style={{ flexShrink: 0 }} variant="soft">
+            в ЧС
+          </Badge>
+        )}
+        {device.sharedWith > 0 && (
+          <Tooltip label="Этот hwid светился и в других подписках — показать" radius="md">
+            <Badge
+              color="orange"
+              onClick={() => {
+                if (shared) return setShared(null);
+                void hwidApi.lookup(device.hwid).then((r) => setShared(r.entries));
+              }}
+              size="sm"
+              style={{ cursor: 'pointer', flexShrink: 0 }}
+              variant="soft"
+            >
+              ещё в {device.sharedWith}
+            </Badge>
+          </Tooltip>
+        )}
+      </Group>
+      {shared && (
+        <Stack gap={2} ml={40} mt={4}>
+          {shared.map((e) => (
+            <Group gap={6} key={`${e.userId}-${e.firstSeen}`} wrap="nowrap">
+              <Text
+                c="cyan"
+                fz="xs"
+                onClick={() => openUser(e.userId)}
+                style={{ cursor: 'pointer' }}
+              >
+                {e.username ?? `id ${e.userId}`}
+              </Text>
+              <Text c="dimmed" fz="xs">
+                {e.status === 'DISABLED' ? 'отключён' : e.status?.toLowerCase() ?? ''}
+                {e.deletedAt ? ' · устройство удалено' : ''} · {timeAgo(e.lastSeen)}
+              </Text>
+            </Group>
+          ))}
+        </Stack>
+      )}
+    </div>
+  );
+}
+
 /** Заголовок блока в стиле Remnawave: иконка в soft-квадрате + название */
 function BlockHeader({ color, icon, title }: { color: string; icon: React.ReactNode; title: string }) {
   return (
@@ -398,6 +500,7 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
         if (a.action === 'disable') return data.user.status !== 'DISABLED';
         if (a.action === 'whitelist') return !data.whitelisted;
         if (a.action === 'unwhitelist') return data.whitelisted;
+        if (a.action === 'hwid_ban') return data.hwid.devices.length > 0;
         return true;
       })
     : [];
@@ -652,6 +755,17 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
                       </Text>
                     )}
                   </SectionCard.Section>
+                  {data.hwid.devices.length > 0 && (
+                    <SectionCard.Section style={{ flex: 1, minHeight: 0 }}>
+                      <ScrollArea.Autosize mah={180}>
+                        <Stack gap={6}>
+                          {data.hwid.devices.map((d) => (
+                            <DeviceRow device={d} key={d.hwid} />
+                          ))}
+                        </Stack>
+                      </ScrollArea.Autosize>
+                    </SectionCard.Section>
+                  )}
                 </SectionCard.Root>
               </Grid.Col>
             )}

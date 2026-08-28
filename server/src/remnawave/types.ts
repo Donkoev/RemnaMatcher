@@ -49,6 +49,16 @@ export interface TorrentReport {
   createdAt: number;
 }
 
+export interface HwidDevice {
+  hwid: string;
+  /** живая панель 2.7.4 отдаёт uuid юзера (контракт 2.7.3 обещает userId — не верить) */
+  userUuid: string;
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  userAgent: string | null;
+}
+
 /** Только чтение. Коллектор получает ровно этот интерфейс и физически не может ничего изменить. */
 export interface RemnaReader {
   getNodes(): Promise<RemnaNode[]>;
@@ -60,6 +70,8 @@ export interface RemnaReader {
   getTorrentReports(): Promise<TorrentReport[]>;
   /** Число HWID-устройств юзера (null — не удалось получить) */
   getHwidDeviceCount(userUuid: string): Promise<number | null>;
+  /** Страница общего списка HWID-устройств (HWID Inspector панели) */
+  getAllHwidDevices(start: number, size: number): Promise<{ devices: HwidDevice[]; total: number }>;
 }
 
 /** Карательные действия. Вызывается ТОЛЬКО из обработчиков кнопок (TG/веб) с подтверждением. */

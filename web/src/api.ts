@@ -122,7 +122,7 @@ export interface UserDetail {
   traffic: { ts: number; used: number }[];
   log: { ts: number; action: string; source: string; ok: 0 | 1; error: string | null }[];
   torrents: { ip: string; node: string; createdAt: number }[];
-  hwid: { count: number | null; limit: number | null };
+  hwid: { count: number | null; limit: number | null; devices: HwidDeviceInfo[] };
 }
 
 export interface Incident {
@@ -142,6 +142,7 @@ export interface ScoringConfig {
   decayHalfLifeHours: number;
   trafficRateBps: number;
   alertCooldownHours: number;
+  hwidAutobanEnabled: boolean;
   telegramAlertsEnabled: boolean;
   uniqueWindowMin: number;
   collector: {
@@ -186,7 +187,40 @@ export interface WhitelistedUser {
   addedAt: number;
 }
 
-export type ActionName = 'revoke' | 'disable' | 'enable' | 'drop' | 'whitelist' | 'unwhitelist';
+export type ActionName = 'revoke' | 'disable' | 'enable' | 'drop' | 'whitelist' | 'unwhitelist' | 'hwid_ban';
+
+export interface HwidDeviceInfo {
+  hwid: string;
+  platform: string | null;
+  osVersion: string | null;
+  deviceModel: string | null;
+  firstSeen: number;
+  lastSeen: number;
+  /** в скольких ЕЩЁ подписках светился этот hwid (вся история) */
+  sharedWith: number;
+  blacklisted: boolean;
+}
+
+export interface HwidBlacklistEntry {
+  hwid: string;
+  reason: string | null;
+  addedAt: number;
+  sourceUserId: number | null;
+  sourceUsername: string | null;
+  seenIn: number;
+}
+
+export interface HwidLookupEntry {
+  userId: number;
+  username: string | null;
+  status: string | null;
+  platform: string | null;
+  deviceModel: string | null;
+  firstSeen: number;
+  lastSeen: number;
+  deletedAt: number | null;
+}
+
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -212,6 +246,14 @@ export interface UpdateStatus {
   url: string | null;
   pending: boolean;
 }
+
+export const hwidApi = {
+  blacklist: () => json<HwidBlacklistEntry[]>('/api/hwid/blacklist'),
+  addToBlacklist: (hwid: string, reason?: string) => post<{ ok: boolean }>('/api/hwid/blacklist', { hwid, reason }),
+  removeFromBlacklist: (hwid: string) => post<{ ok: boolean }>('/api/hwid/blacklist/remove', { hwid }),
+  lookup: (hwid: string) =>
+    json<{ hwid: string; blacklisted: boolean; entries: HwidLookupEntry[] }>(`/api/hwid/lookup?hwid=${encodeURIComponent(hwid)}`),
+};
 
 export const updateApi = {
   status: () => json<UpdateStatus>('/api/update/status'),

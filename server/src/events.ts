@@ -21,9 +21,18 @@ export interface CycleEvent {
   ipsSeen: number;
 }
 
+export interface HwidAutobanEvent {
+  userId: number;
+  username: string;
+  hwid: string;
+  sourceUsername: string | null;
+  ok: boolean;
+}
+
 interface Events {
   incident: [IncidentEvent];
   cycle: [CycleEvent];
+  hwid_autoban: [HwidAutobanEvent];
 }
 
 export const bus = new EventEmitter<Events>();

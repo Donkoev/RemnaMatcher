@@ -60,7 +60,7 @@ async function main(): Promise<void> {
 
   const engine = new ScoringEngine(db, geo, () => loadScoringConfig(db));
   const actions = new Actions(db, enforcer);
-  const collector = new Collector(db, reader, engine, () => loadScoringConfig(db));
+  const collector = new Collector(db, reader, engine, () => loadScoringConfig(db), actions);
 
   startTelegram({
     token: env.TELEGRAM_BOT_TOKEN,

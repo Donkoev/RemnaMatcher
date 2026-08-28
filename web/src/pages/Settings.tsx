@@ -6,6 +6,7 @@ import {
   TbCheck,
   TbClock,
   TbDatabase,
+  TbDeviceMobileOff,
   TbListSearch,
   TbSettings,
   TbShieldLock,
@@ -511,6 +512,19 @@ export function Settings() {
               />
             </Tooltip>
           </Group>
+      </SettingsCard>
+
+      <SettingsCard
+        icon={<TbDeviceMobileOff size={18} />}
+        subtitle="Устройства из чёрного списка (страница «HWID»)"
+        title="HWID-блэклист"
+      >
+        <Switch
+          checked={cfg.hwidAutobanEnabled}
+          description="Устройство из чёрного списка всплыло в живой подписке — подписка отключается, в TG прилетает отчёт"
+          label="Автобан по чёрному списку"
+          onChange={(e) => setCfg({ ...cfg, hwidAutobanEnabled: e.currentTarget.checked })}
+        />
       </SettingsCard>
 
       <SettingsCard

@@ -1,4 +1,4 @@
-import type { NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport } from './types.js';
+import type { HwidDevice, NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport } from './types.js';
 
 // Мок-режим: имитирует панель по паттернам реальных данных (снятым с боевой
 // панели 2026-08-26): те же 9 нод, имена юзеров rs_*/tg_*, реальные ASN,
@@ -203,6 +203,28 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
     const limit = st.user.hwidDeviceLimit ?? 5;
     // фродеры упираются в лимит, обычные — 1-2 устройства
     return st.kind === 'sharer' ? limit : Math.min(limit, randInt(1, 3));
+  }
+
+  async getAllHwidDevices(start: number, size: number): Promise<{ devices: HwidDevice[]; total: number }> {
+    // детерминированные устройства: у каждого юзера 1-3, у фродеров одно устройство
+    // «гуляет» между несколькими подписками (id кратные 7 делят hwid shared-X)
+    const all: HwidDevice[] = [];
+    const platforms = ['ios', 'android', 'windows', 'macos'];
+    for (const st of this.users.values()) {
+      const id = st.user.id;
+      const n = st.kind === 'sharer' ? 3 : 1 + (id % 2);
+      for (let d = 0; d < n; d++) {
+        all.push({
+          hwid: id % 7 === 0 && d === 0 ? `shared-${id % 3}` : `hwid-${id}-${d}`,
+          userUuid: st.user.uuid,
+          platform: platforms[(id + d) % platforms.length]!,
+          osVersion: `1${(id + d) % 8}.0`,
+          deviceModel: `Device-${(id + d) % 20}`,
+          userAgent: null,
+        });
+      }
+    }
+    return { devices: all.slice(start, start + size), total: all.length };
   }
 
   private torrentReportId = 0;

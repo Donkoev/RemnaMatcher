@@ -69,6 +69,7 @@ const ScoringConfigSchema = z.object({
   decayHalfLifeHours: z.number().min(0.5).max(168),
   trafficRateBps: z.number().min(0),
   alertCooldownHours: z.number().min(0).max(168),
+  hwidAutobanEnabled: z.boolean(),
   telegramAlertsEnabled: z.boolean(),
   signals: z.object({
     multiAsn: z.object({ enabled: z.boolean(), minAsns: z.number().min(2).max(20) }),
@@ -332,8 +333,25 @@ export async function startApi(opts: {
       | undefined;
     if (!user) return reply.code(404).send({ error: 'user not found' });
 
-    // число HWID-устройств тянем с панели при открытии отчёта (read-only)
-    const hwidCount = await remna.getHwidDeviceCount(user.uuid);
+    // устройства — из локального зеркала (быстро); пока зеркало пустое — живой счётчик с панели
+    const devices = db
+      .prepare<[number], { hwid: string; platform: string | null; osVersion: string | null; deviceModel: string | null; firstSeen: number; lastSeen: number }>(
+        `SELECT hwid, platform, os_version AS osVersion, device_model AS deviceModel,
+                first_seen AS firstSeen, last_seen AS lastSeen
+         FROM hwid_devices WHERE user_id = ? AND deleted_at IS NULL
+         ORDER BY last_seen DESC`,
+      )
+      .all(userId);
+    const sharedStmt = db.prepare<[string, number], { n: number }>(
+      'SELECT COUNT(DISTINCT user_id) AS n FROM hwid_devices WHERE hwid = ? AND user_id != ?',
+    );
+    const blStmt = db.prepare<[string], { hwid: string }>('SELECT hwid FROM hwid_blacklist WHERE hwid = ?');
+    const deviceList = devices.map((d) => ({
+      ...d,
+      sharedWith: sharedStmt.get(d.hwid, userId)?.n ?? 0,
+      blacklisted: !!blStmt.get(d.hwid),
+    }));
+    const hwidCount = deviceList.length > 0 ? deviceList.length : await remna.getHwidDeviceCount(user.uuid);
 
     const cfg = loadScoringConfig(db);
     const windowStart = Date.now() - cfg.activeWindowMin * 60_000;
@@ -412,8 +430,53 @@ export async function startApi(opts: {
       traffic,
       log,
       torrents,
-      hwid: { count: hwidCount, limit: user.hwid_limit ?? null },
+      hwid: { count: hwidCount, limit: user.hwid_limit ?? null, devices: deviceList },
     };
+  });
+
+  // --- HWID: чёрный список и история устройства по подпискам ---
+  app.get('/api/hwid/blacklist', () => {
+    return db
+      .prepare(
+        `SELECT b.hwid, b.reason, b.added_at AS addedAt, b.source_user_id AS sourceUserId, u.username AS sourceUsername,
+                (SELECT COUNT(DISTINCT d.user_id) FROM hwid_devices d WHERE d.hwid = b.hwid) AS seenIn
+         FROM hwid_blacklist b LEFT JOIN users u ON u.id = b.source_user_id
+         ORDER BY b.added_at DESC`,
+      )
+      .all();
+  });
+
+  app.post('/api/hwid/blacklist', (req, reply) => {
+    const parsed = z.object({ hwid: z.string().min(3).max(200), reason: z.string().max(200).optional() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad hwid' });
+    db.prepare('INSERT OR REPLACE INTO hwid_blacklist (hwid, reason, source_user_id, added_at) VALUES (?, ?, NULL, ?)').run(
+      parsed.data.hwid.trim(),
+      parsed.data.reason ?? 'добавлен вручную',
+      Date.now(),
+    );
+    return { ok: true };
+  });
+
+  app.post('/api/hwid/blacklist/remove', (req, reply) => {
+    const parsed = z.object({ hwid: z.string() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad hwid' });
+    db.prepare('DELETE FROM hwid_blacklist WHERE hwid = ?').run(parsed.data.hwid);
+    return { ok: true };
+  });
+
+  // история: в каких подписках светился hwid (включая уже удалённые из панели устройства)
+  app.get('/api/hwid/lookup', (req, reply) => {
+    const q = (req.query as { hwid?: string }).hwid?.trim();
+    if (!q) return reply.code(400).send({ error: 'нужен hwid' });
+    const entries = db
+      .prepare(
+        `SELECT d.user_id AS userId, u.username, u.status, d.platform, d.device_model AS deviceModel,
+                d.first_seen AS firstSeen, d.last_seen AS lastSeen, d.deleted_at AS deletedAt
+         FROM hwid_devices d LEFT JOIN users u ON u.id = d.user_id
+         WHERE d.hwid = ? ORDER BY d.last_seen DESC`,
+      )
+      .all(q);
+    return { hwid: q, blacklisted: !!db.prepare('SELECT 1 FROM hwid_blacklist WHERE hwid = ?').get(q), entries };
   });
 
   app.get('/api/incidents', (req) => {
@@ -439,7 +502,7 @@ export async function startApi(opts: {
   });
 
   const ActionParams = z.object({
-    action: z.enum(['revoke', 'disable', 'enable', 'drop', 'whitelist', 'unwhitelist']),
+    action: z.enum(['revoke', 'disable', 'enable', 'drop', 'whitelist', 'unwhitelist', 'hwid_ban']),
     userId: z.coerce.number().int(),
   });
 

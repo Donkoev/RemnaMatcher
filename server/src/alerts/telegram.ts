@@ -193,6 +193,17 @@ export function startTelegram(opts: {
     void drain();
   });
 
+  // автобан по HWID-блэклисту: шлём всегда, даже при выключенных обычных алертах —
+  // это исполнение приговора, о нём надо знать
+  bus.on('hwid_autoban', (ev) => {
+    if (adminChatId === undefined) return;
+    const src = ev.sourceUsername ? ` (устройство из бана ${ev.sourceUsername})` : '';
+    const text = ev.ok
+      ? `🚫 Автобан по HWID: ${ev.username} отключён${src}.\nHWID: ${ev.hwid}`
+      : `⚠️ Автобан по HWID не сработал для ${ev.username}${src} — проверь журнал.`;
+    void bot.api.sendMessage(adminChatId, text).catch((err) => console.error('[alert] hwid autoban:', err));
+  });
+
   bot.catch((err) => console.error('[telegram]', err));
 
   // long-polling не должен ронять процесс: при сетевых сбоях ретраим сами

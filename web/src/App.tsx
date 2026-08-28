@@ -2,13 +2,14 @@ import { useEffect, useMemo } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { ActionIcon, AppShell, Badge, Burger, Group, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
-import { TbGavel, TbHeart, TbHistory, TbLogout, TbRadar2, TbSettings } from 'react-icons/tb';
+import { TbDeviceMobileOff, TbGavel, TbHeart, TbHistory, TbLogout, TbRadar2, TbSettings } from 'react-icons/tb';
 import { PiShieldCheckeredDuotone } from 'react-icons/pi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi } from './api';
 import { UserModalHost } from './components/UserModalHost';
 import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
+import { Hwid } from './pages/Hwid';
 import { Punished } from './pages/Punished';
 import { Settings } from './pages/Settings';
 import { Whitelist } from './pages/Whitelist';
@@ -27,6 +28,7 @@ const NAV_SECTIONS: { title: string; items: { to: string; label: string; Icon: R
     items: [
       { to: '/punished', label: 'Наказанные', Icon: TbGavel },
       { to: '/whitelist', label: 'Белый список', Icon: TbHeart },
+      { to: '/hwid', label: 'HWID', Icon: TbDeviceMobileOff },
     ],
   },
   {
@@ -177,6 +179,7 @@ export function App() {
             <Route element={<Journal />} path="/journal" />
             <Route element={<Punished />} path="/punished" />
             <Route element={<Whitelist />} path="/whitelist" />
+            <Route element={<Hwid />} path="/hwid" />
             <Route element={<Settings />} path="/settings" />
           </Routes>
         </AppShell.Main>

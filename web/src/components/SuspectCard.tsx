@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import {
   TbBan,
+  TbDeviceMobileOff,
   TbDotsVertical,
   TbFingerprint,
   TbHeart,
@@ -53,6 +54,14 @@ const ACTIONS: { action: ActionName; color: string; confirm: string; Icon: React
     Icon: TbPlugOff,
     label: 'Сбросить соединения',
     confirm: 'Сбросить все активные соединения юзера на всех нодах?',
+  },
+  {
+    action: 'hwid_ban',
+    color: 'red',
+    Icon: TbDeviceMobileOff,
+    label: 'Забанить устройства',
+    confirm:
+      'Все HWID-устройства юзера уйдут в чёрный список, подписка отключится. Всплывут в другой подписке — та отключится автоматически.',
   },
   {
     action: 'whitelist',
