@@ -325,7 +325,7 @@ const SUB_STATUS: Record<string, { color: string; label: string }> = {
  * Карточка HWID-устройства в стиле панели Remnawave: иконка платформы
  * в soft-квадрате, номер и модель, копируемое поле HWID, пересечения и метка ЧС.
  */
-function DeviceCard({ device, index }: { device: HwidDeviceInfo; index: number }) {
+function DeviceCard({ device, index, ownUserId }: { device: HwidDeviceInfo; index: number; ownUserId: number }) {
   const { openUser } = useUserModal();
   const [shared, setShared] = useState<HwidLookupEntry[] | null>(null);
   const Icon = PLATFORM_ICONS[(device.platform ?? '').toLowerCase()] ?? TbDevices;
@@ -359,7 +359,8 @@ function DeviceCard({ device, index }: { device: HwidDeviceInfo; index: number }
                   color="orange"
                   onClick={() => {
                     if (shared) return setShared(null);
-                    void hwidApi.lookup(device.hwid).then((r) => setShared(r.entries));
+                    // свою же подписку в списке «ещё в N» не показываем
+                    void hwidApi.lookup(device.hwid).then((r) => setShared(r.entries.filter((e) => e.userId !== ownUserId)));
                   }}
                   size="sm"
                   style={{ cursor: 'pointer' }}
@@ -1175,7 +1176,7 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
                 Устройств в зеркале пока нет — появятся после ближайшей синхронизации
               </Text>
             ) : (
-              data.hwid.devices.map((d, i) => <DeviceCard device={d} index={i} key={d.hwid} />)
+              data.hwid.devices.map((d, i) => <DeviceCard device={d} index={i} key={d.hwid} ownUserId={data.user.id} />)
             )}
           </Stack>
         )}
