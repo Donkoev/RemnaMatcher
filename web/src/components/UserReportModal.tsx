@@ -22,6 +22,7 @@ import {
   ThemeIcon,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   TbArrowsSort,
@@ -312,6 +313,14 @@ function ExpireRow({ expireAt }: { expireAt: number | null }) {
   );
 }
 
+/** статус подписки в раскрытии «ещё в N» — цвет и русская подпись */
+const SUB_STATUS: Record<string, { color: string; label: string }> = {
+  ACTIVE: { color: 'teal', label: 'активна' },
+  DISABLED: { color: 'red', label: 'отключена' },
+  EXPIRED: { color: 'gray', label: 'истекла' },
+  LIMITED: { color: 'orange', label: 'лимит' },
+};
+
 /**
  * Карточка HWID-устройства в стиле панели Remnawave: иконка платформы
  * в soft-квадрате, номер и модель, копируемое поле HWID, пересечения и метка ЧС.
@@ -368,17 +377,36 @@ function DeviceCard({ device, index }: { device: HwidDeviceInfo; index: number }
         </Box>
 
         {shared && (
-          <Stack gap={2} mt={6}>
+          <Stack gap={4} mt={8}>
             {shared.map((e) => (
-              <Group gap={6} key={`${e.userId}-${e.firstSeen}`} wrap="nowrap">
-                <Text c="cyan" fz="xs" onClick={() => openUser(e.userId)} style={{ cursor: 'pointer' }}>
-                  {e.username ?? `id ${e.userId}`}
-                </Text>
-                <Text c="dimmed" fz="xs">
-                  {e.status === 'DISABLED' ? 'отключён' : (e.status?.toLowerCase() ?? '')}
-                  {e.deletedAt ? ' · устройство удалено' : ''} · {timeAgo(e.lastSeen)}
-                </Text>
-              </Group>
+              <UnstyledButton
+                className="rw-device-user-row"
+                key={`${e.userId}-${e.firstSeen}`}
+                onClick={() => openUser(e.userId)}
+              >
+                <Group gap="xs" justify="space-between" wrap="nowrap">
+                  <Group gap={8} style={{ minWidth: 0 }} wrap="nowrap">
+                    <PiUserCircle color="var(--mantine-color-cyan-4)" size={16} style={{ flexShrink: 0 }} />
+                    <Text c="white" fw={600} fz="xs" truncate>
+                      {e.username ?? `id ${e.userId}`}
+                    </Text>
+                  </Group>
+                  <Group gap={6} style={{ flexShrink: 0 }} wrap="nowrap">
+                    {e.deletedAt ? (
+                      <Badge color="gray" size="xs" variant="soft">
+                        устройство удалено
+                      </Badge>
+                    ) : (
+                      <Badge color={SUB_STATUS[e.status ?? '']?.color ?? 'gray'} size="xs" variant="soft">
+                        {SUB_STATUS[e.status ?? '']?.label ?? (e.status?.toLowerCase() ?? '—')}
+                      </Badge>
+                    )}
+                    <Text c="dimmed" fz={11}>
+                      {timeAgo(e.lastSeen)}
+                    </Text>
+                  </Group>
+                </Group>
+              </UnstyledButton>
             ))}
           </Stack>
         )}
@@ -731,9 +759,9 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
               <SectionCard.Root gap="sm" h="100%">
                 <SectionCard.Section>
                   <Group justify="space-between" wrap="nowrap">
-                    <BlockHeader color="orange" icon={<TbNotes size={18} />} title="Описание" />
+                    <BlockHeader color="teal" icon={<TbNotes size={18} />} title="Описание" />
                     {data.user.tag && (
-                      <Badge color="gray" size="sm" variant="outline">
+                      <Badge color="cyan" size="md" variant="soft">
                         {data.user.tag}
                       </Badge>
                     )}
