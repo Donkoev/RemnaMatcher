@@ -62,7 +62,7 @@ export function App() {
   }, [qc]);
 
   const modalCtx = useMemo(() => ({ openUser: (id: number) => userModalController.open(id) }), []);
-  const openIncidents = overview?.totals.openIncidents ?? 0;
+  const newIncidents = overview?.totals.newIncidents ?? 0;
 
   return (
     <UserModalContext.Provider value={modalCtx}>
@@ -130,9 +130,9 @@ export function App() {
                       >
                         <Icon />
                         <span style={{ flex: 1 }}>{label}</span>
-                        {to === '/journal' && openIncidents > 0 && (
+                        {to === '/journal' && newIncidents > 0 && (
                           <Badge circle color="red" size="sm" variant="filled">
-                            {openIncidents}
+                            {newIncidents}
                           </Badge>
                         )}
                       </NavLink>

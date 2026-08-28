@@ -42,6 +42,7 @@ import {
   TbDotsVertical,
   TbExternalLink,
   TbFingerprint,
+  TbGavel,
   TbHistory,
   TbNotes,
   TbNetwork,
@@ -334,14 +335,14 @@ function DeviceCard({ device, index, ownUserId }: { device: HwidDeviceInfo; inde
       <SectionCard.Section>
         <Group gap="sm" justify="space-between" wrap="nowrap">
           <Group gap="sm" style={{ minWidth: 0 }} wrap="nowrap">
-            <ThemeIcon color={device.blacklisted ? 'red' : 'indigo'} size="lg" variant="soft">
-              <Icon size={18} />
+            <ThemeIcon color={device.blacklisted ? 'red' : 'indigo'} radius="md" size="xl" variant="soft">
+              <Icon size={24} />
             </ThemeIcon>
             <Stack gap={0} style={{ minWidth: 0 }}>
-              <Text fw={600} fz="sm" truncate>
+              <Text fw={600} fz="md" truncate>
                 #{index + 1} · {device.deviceModel ?? device.platform ?? 'устройство'}
               </Text>
-              <Text c="dimmed" fz="xs" truncate>
+              <Text c="dimmed" fz="sm" truncate>
                 {[device.platform, device.osVersion].filter(Boolean).join(' ') || 'платформа неизвестна'} ·{' '}
                 {timeAgo(device.lastSeen)}
               </Text>
@@ -373,8 +374,8 @@ function DeviceCard({ device, index, ownUserId }: { device: HwidDeviceInfo; inde
           </Group>
         </Group>
 
-        <Box mt={8}>
-          <CopyableField size="xs" value={device.hwid} />
+        <Box mt={10}>
+          <CopyableField size="sm" value={device.hwid} />
         </Box>
 
         {shared && (
@@ -608,6 +609,25 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
               {data.user.username}
             </Text>
             {data.score && <LevelBadge level={data.score.level} score={data.score.score} size="md" />}
+            {data.punished.count > 0 && (
+              <Tooltip
+                label={`${(data.punished.actions ?? '')
+                  .split(',')
+                  .map((a) => ACTION_LABELS[a] ?? a)
+                  .join(', ')} · последнее ${data.punished.lastTs ? new Date(data.punished.lastTs).toLocaleString('ru-RU') : ''}`}
+                radius="md"
+              >
+                <Badge
+                  color="red"
+                  leftSection={<TbGavel size={13} />}
+                  size="md"
+                  style={{ cursor: 'help' }}
+                  variant="outline"
+                >
+                  наказывали ×{data.punished.count}
+                </Badge>
+              </Tooltip>
+            )}
             {data.whitelisted && (
               <Badge color="gray" size="sm" variant="outline">
                 whitelist
@@ -1142,7 +1162,7 @@ export function UserReportModal({ userId, onClose }: { userId: number | null; on
         onClose={() => setDevicesOpen(false)}
         opened={devicesOpen}
         position="right"
-        size={420}
+        size={480}
         title={
           <Group gap="sm" wrap="nowrap">
             <ThemeIcon color="indigo" size="lg" variant="soft">

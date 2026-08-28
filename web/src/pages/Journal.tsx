@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Center, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { TbHistory } from 'react-icons/tb';
 import { PiEmptyDuotone } from 'react-icons/pi';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import { LevelBadge } from '../components/LevelBadge';
 import { PageHeader } from '../components/rw/PageHeader';
@@ -33,8 +33,14 @@ function Empty({ text }: { text: string }) {
 
 export function Journal() {
   const { openUser } = useUserModal();
+  const qc = useQueryClient();
   const [tab, setTab] = useState('incidents');
   const [status, setStatus] = useState('open');
+
+  // открытие журнала гасит бейдж новых инцидентов в сайдбаре
+  useEffect(() => {
+    void api.incidentsSeen().then(() => qc.invalidateQueries({ queryKey: ['overview'] }));
+  }, [qc]);
 
   const { data: incidents } = useQuery({
     queryKey: ['incidents', status],

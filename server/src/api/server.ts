@@ -199,9 +199,17 @@ export async function startApi(opts: {
     const openIncidents = db
       .prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM incidents WHERE status = 'open'")
       .get()!.n;
+    // бейдж у «Журнала» показывает только НОВЫЕ инциденты — с момента последнего открытия журнала
+    const seenTs = Number(
+      db.prepare<[string], { value: string }>('SELECT value FROM settings WHERE key = ?').get('incidents_seen_ts')
+        ?.value ?? 0,
+    );
+    const newIncidents = db
+      .prepare<[number], { n: number }>("SELECT COUNT(*) AS n FROM incidents WHERE status = 'open' AND created_at > ?")
+      .get(seenTs)!.n;
     return {
       mode: opts.mode,
-      totals: { ...totals, totalUsers, openIncidents },
+      totals: { ...totals, totalUsers, openIncidents, newIncidents },
       levels: Object.fromEntries(levels.map((l) => [l.level, l.n])),
       nodes,
     };
@@ -236,7 +244,9 @@ export async function startApi(opts: {
         `SELECT s.user_id AS userId, s.score, s.level, s.signals, s.active_ips AS activeIps, s.updated_at AS updatedAt,
                 u.username, u.status, u.telegram_id AS telegramId,
                 (SELECT 1 FROM whitelist w WHERE w.user_id = s.user_id) AS whitelisted,
-                (SELECT COUNT(DISTINCT o.ip) FROM ip_observations o WHERE o.user_id = s.user_id AND o.last_seen >= ?) AS uniqueIps
+                (SELECT COUNT(DISTINCT o.ip) FROM ip_observations o WHERE o.user_id = s.user_id AND o.last_seen >= ?) AS uniqueIps,
+                (SELECT COUNT(*) FROM actions_log al WHERE al.user_id = s.user_id AND al.ok = 1
+                   AND al.action IN ('revoke', 'disable', 'drop', 'hwid_ban')) AS punishedCount
          FROM score_state s LEFT JOIN users u ON u.id = s.user_id
          WHERE ${where}
          ORDER BY s.score DESC
@@ -431,6 +441,13 @@ export async function startApi(opts: {
       log,
       torrents,
       hwid: { count: hwidCount, limit: user.hwid_limit ?? null, devices: deviceList },
+      // метка «уже наказывали»: успешные карательные действия из нашего журнала
+      punished: db
+        .prepare<[number], { count: number; lastTs: number | null; actions: string | null }>(
+          `SELECT COUNT(*) AS count, MAX(ts) AS lastTs, GROUP_CONCAT(DISTINCT action) AS actions
+           FROM actions_log WHERE user_id = ? AND ok = 1 AND action IN ('revoke', 'disable', 'drop', 'hwid_ban')`,
+        )
+        .get(userId) ?? { count: 0, lastTs: null, actions: null },
     };
   });
 
@@ -477,6 +494,12 @@ export async function startApi(opts: {
       )
       .all(q);
     return { hwid: q, blacklisted: !!db.prepare('SELECT 1 FROM hwid_blacklist WHERE hwid = ?').get(q), entries };
+  });
+
+  // открытие «Журнала» сбрасывает бейдж новых инцидентов (статусы инцидентов не трогаются)
+  app.post('/api/incidents/seen', () => {
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('incidents_seen_ts', String(Date.now()));
+    return { ok: true };
   });
 
   app.get('/api/incidents', (req) => {

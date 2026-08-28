@@ -18,6 +18,7 @@ import {
   TbDeviceMobileOff,
   TbDotsVertical,
   TbFingerprint,
+  TbGavel,
   TbHeart,
   TbPlugOff,
   TbRefreshAlert,
@@ -166,7 +167,16 @@ export function SuspectCard({ suspect }: { suspect: Suspect }) {
         </Group>
 
         <Group gap="xs" justify="space-between" mt={8} wrap="nowrap">
-          <LevelBadge level={suspect.level} score={suspect.score} size="md" tooltip={evidenceTooltip} />
+          <Group gap={6} wrap="nowrap">
+            <LevelBadge level={suspect.level} score={suspect.score} size="md" tooltip={evidenceTooltip} />
+            {suspect.punishedCount > 0 && (
+              <Tooltip label={`Уже наказывали: ${suspect.punishedCount} ${plural(suspect.punishedCount, ['действие', 'действия', 'действий'])} в журнале`} radius="md">
+                <Badge color="red" size="md" style={{ cursor: 'help', paddingInline: 6 }} variant="outline">
+                  <TbGavel size={13} style={{ display: 'block' }} />
+                </Badge>
+              </Tooltip>
+            )}
+          </Group>
           <Group gap={6} style={{ flexShrink: 0 }} wrap="nowrap">
             <Tooltip label={`Уникальные IP за последние ${cfg?.uniqueWindowMin ?? 10} минут`} radius="md">
               <Badge color={levelColor} leftSection={<TbFingerprint size={16} />} size="lg" variant="soft">

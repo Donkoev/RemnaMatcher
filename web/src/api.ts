@@ -15,6 +15,8 @@ export interface Overview {
     activeUsers: number;
     totalUsers: number;
     openIncidents: number;
+    /** открытые инциденты, появившиеся после последнего открытия «Журнала» — для бейджа */
+    newIncidents: number;
   };
   levels: Partial<Record<Level, number>>;
   nodes: NodeStatus[];
@@ -56,6 +58,8 @@ export interface Suspect {
   signals: Signal[];
   activeIps: number;
   uniqueIps: number;
+  /** сколько раз юзера уже наказывали (revoke/disable/drop/hwid_ban) */
+  punishedCount: number;
   updatedAt: number;
   username: string | null;
   status: string | null;
@@ -126,6 +130,8 @@ export interface UserDetail {
   log: { ts: number; action: string; source: string; ok: 0 | 1; error: string | null }[];
   torrents: { ip: string; node: string; createdAt: number }[];
   hwid: { count: number | null; limit: number | null; devices: HwidDeviceInfo[] };
+  // «уже наказывали»: успешные карательные действия из нашего журнала
+  punished: { count: number; lastTs: number | null; actions: string | null };
 }
 
 export interface Incident {
@@ -284,6 +290,7 @@ export const api = {
   user: (id: number) => json<UserDetail>(`/api/users/${id}`),
   incidents: (status?: string) =>
     json<Incident[]>(`/api/incidents${status ? `?status=${status}` : ''}`),
+  incidentsSeen: () => post<{ ok: boolean }>('/api/incidents/seen', {}),
   actionsLog: () => json<ActionLogEntry[]>('/api/actions-log'),
   lists: () => json<{ punished: PunishedUser[]; whitelist: WhitelistedUser[] }>('/api/lists'),
   settings: () => json<ScoringConfig>('/api/settings'),
