@@ -26,16 +26,16 @@ banner() {
   say ""
 }
 
-# ask <вопрос> <переменная> [дефолт] [secret]
+# ask <вопрос> <переменная> [дефолт]
 ask() {
-  local prompt="$1" var="$2" def="${3:-}" secret="${4:-}" input
+  local prompt="$1" var="$2" def="${3:-}" input
   while true; do
     if [ -n "$def" ]; then
       echo -ne "  ${CYAN}?${NC} ${prompt} ${DIM}[${def}]${NC}: "
     else
       echo -ne "  ${CYAN}?${NC} ${prompt}: "
     fi
-    if [ "$secret" = "secret" ]; then read -rs input; echo; else read -r input; fi
+    read -r input
     input="${input:-$def}"
     [ -n "$input" ] && { printf -v "$var" '%s' "$input"; break; }
     warn "поле обязательное"
@@ -86,15 +86,21 @@ if [ -f "$ENV_FILE" ] && ! confirm "Найден существующий .env �
 else
   say ""
   say "${BOLD}  Подключение к панели Remnawave${NC}"
-  ask "URL панели (https://panel.example.com)" PANEL_URL
+  say "  ${GRAY}Это адрес существующей панели Remnawave, откуда берутся данные —${NC}"
+  say "  ${GRAY}НЕ домен, на котором будет висеть сам RemnaMatcher (его спросим позже).${NC}"
+  ask "URL панели Remnawave (https://panel.example.com)" PANEL_URL
   PANEL_URL="${PANEL_URL%/}"
-  ask "API-токен панели (создай отдельный под RemnaMatcher)" PANEL_TOKEN "" secret
+  case "$PANEL_URL" in
+    http://*|https://*) ;;
+    *) PANEL_URL="https://${PANEL_URL}"; say "  ${GRAY}Добавил https:// → ${PANEL_URL}${NC}" ;;
+  esac
+  ask "API-токен панели (создай отдельный под RemnaMatcher)" PANEL_TOKEN
   say "  ${GRAY}Если панель прикрыта nginx-секретом в ссылке (?key=value) — введи его. У большинства его нет.${NC}"
   echo -ne "  ${CYAN}?${NC} Секрет nginx-защиты key=value ${DIM}[Enter — пропустить]${NC}: "; read -r PANEL_SECRET
 
   say ""
   say "${BOLD}  Telegram-уведомления${NC}"
-  ask "Токен бота от @BotFather" TG_TOKEN "" secret
+  ask "Токен бота от @BotFather" TG_TOKEN
   ask "Твой chat id (напиши боту /start — он покажет)" TG_CHAT
 
   say ""
