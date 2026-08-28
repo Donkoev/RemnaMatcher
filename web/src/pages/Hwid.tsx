@@ -65,7 +65,7 @@ export function Hwid() {
                   leftSection={<TbSearch size={15} />}
                   onChange={(e) => setSearch(e.currentTarget.value)}
                   onKeyDown={(e) => e.key === 'Enter' && void runLookup()}
-                  placeholder="hwid устройства"
+                  placeholder="HWID устройства"
                   rightSection={
                     search ? (
                       <ActionIcon
@@ -161,7 +161,7 @@ export function Hwid() {
                 <TextInput
                   onChange={(e) => setManualHwid(e.currentTarget.value)}
                   onKeyDown={(e) => e.key === 'Enter' && manualHwid.trim() && addMutation.mutate(manualHwid.trim())}
-                  placeholder="добавить hwid вручную"
+                  placeholder="добавить HWID вручную"
                   size="xs"
                   value={manualHwid}
                   w={280}
