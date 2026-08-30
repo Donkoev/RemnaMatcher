@@ -204,7 +204,7 @@ export function Settings() {
         subtitle="Как часто опрашивать панель и сколько хранить сырые данные"
         title="Сбор данных"
       >
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
               description="Новый круг опроса — не чаще, чем раз в это время"
               label="Период опроса, сек"
