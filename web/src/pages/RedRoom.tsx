@@ -29,7 +29,16 @@ import { SectionCard } from '../components/rw/SectionCard';
 // Красная комната: скрытый раздел-заглушка (RED_ROOM в .env).
 // Пока чистый фронт: макет из мок-данных, наполнение и логика появятся позже.
 
-// вход-анимация: сигил с черепом собирается (~2.2 с), потом створки шлюза разъезжаются
+// Арт заставки: владелец кладёт свою картинку в web/src/assets/redroom-skull.(png|jpg|jpeg|webp) —
+// glob подхватит её при сборке; пока файла нет, показывается запасной векторный череп
+const skullArt = import.meta.glob('../assets/redroom-skull.{png,jpg,jpeg,webp}', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+}) as Record<string, string>;
+const skullArtUrl = Object.values(skullArt)[0];
+
+// вход-анимация: череп проявляется (~2.2 с), потом створки шлюза разъезжаются
 function EntryGate({ onDone }: { onDone: () => void }) {
   const [opening, setOpening] = useState(false);
 
@@ -49,7 +58,14 @@ function EntryGate({ onDone }: { onDone: () => void }) {
       <div className="rr-door rr-door-top" />
       <div className="rr-door rr-door-bottom" />
       <div className="rr-splash">
-        <RedRoomSkull />
+        {skullArtUrl ? (
+          <div className="rrp-wrap">
+            <div className="rrp-glow" />
+            <img alt="" className="rrp-img" src={skullArtUrl} />
+          </div>
+        ) : (
+          <RedRoomSkull />
+        )}
         <div className="rr-glitch" data-text="КРАСНАЯ КОМНАТА">
           КРАСНАЯ КОМНАТА
         </div>
