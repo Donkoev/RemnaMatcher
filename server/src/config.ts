@@ -15,6 +15,9 @@ const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ADMIN_CHAT_ID: z.coerce.number().optional(),
 
+  /** Скрытый красный раздел: появляется в панели, только если тут указана любая непустая строка */
+  RED_ROOM: z.string().optional(),
+
   // периоды опроса/синка, окна и ретеншн живут в настройках панели (settings в БД), не в env
 
   DB_PATH: z.string().default('./data/remnamatcher.db'),

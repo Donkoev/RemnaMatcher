@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { ActionIcon, AppShell, Badge, Burger, Group, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
-import { TbDeviceMobileOff, TbGavel, TbHeart, TbHistory, TbLogout, TbRadar2, TbSettings } from 'react-icons/tb';
+import { TbDeviceMobileOff, TbGavel, TbHeart, TbHistory, TbLogout, TbRadar2, TbSettings, TbSkull } from 'react-icons/tb';
 import { PiShieldCheckeredDuotone } from 'react-icons/pi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi } from './api';
@@ -11,6 +11,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
 import { Hwid } from './pages/Hwid';
 import { Punished } from './pages/Punished';
+import { RedRoom } from './pages/RedRoom';
 import { Settings } from './pages/Settings';
 import { Whitelist } from './pages/Whitelist';
 import { UserModalContext, userModalController } from './userModal';
@@ -140,6 +141,25 @@ export function App() {
                   </Stack>
                 </div>
               ))}
+
+              {/* Красная комната: скрытая секция, видна только при RED_ROOM в .env */}
+              {overview?.redRoom && (
+                <div>
+                  <div className="rw-section-title rw-section-title-red">Спецотдел</div>
+                  <Stack gap={4}>
+                    <NavLink
+                      className="rw-nav-link rw-nav-link-red"
+                      data-active={location.pathname === '/redroom' || undefined}
+                      onClick={closeNav}
+                      to="/redroom"
+                    >
+                      <TbSkull />
+                      <span style={{ flex: 1 }}>Красная комната</span>
+                      <span className="rr-pulse-dot" />
+                    </NavLink>
+                  </Stack>
+                </div>
+              )}
             </Stack>
 
             <div style={{ flexGrow: 1 }} />
@@ -181,6 +201,7 @@ export function App() {
             <Route element={<Whitelist />} path="/whitelist" />
             <Route element={<Hwid />} path="/hwid" />
             <Route element={<Settings />} path="/settings" />
+            {overview?.redRoom && <Route element={<RedRoom />} path="/redroom" />}
           </Routes>
         </AppShell.Main>
       </AppShell>

@@ -217,6 +217,8 @@ export async function startApi(opts: {
       .get(seenTs)!.n;
     return {
       mode: opts.mode,
+      // скрытый раздел «Красная комната» — включается особой строкой RED_ROOM в .env
+      redRoom: Boolean(env.RED_ROOM),
       totals: { ...totals, totalUsers, openIncidents, newIncidents },
       levels: Object.fromEntries(levels.map((l) => [l.level, l.n])),
       nodes,

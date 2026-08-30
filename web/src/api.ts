@@ -13,6 +13,8 @@ export interface Overview {
   /** последний завершённый круг опроса: когда закончился и сколько занял */
   lastCycle: { at: number; durationMs: number } | null;
   mode: 'mock' | 'live';
+  /** скрытый раздел «Красная комната» включён строкой RED_ROOM в .env */
+  redRoom: boolean;
   totals: {
     activeIps: number;
     uniqueIps: number;
