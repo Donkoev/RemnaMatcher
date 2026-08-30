@@ -323,12 +323,19 @@ body {
 }
 .rr-door-top {
   top: 0;
-  border-bottom: 1px solid rgba(250, 82, 82, 0.6);
-  box-shadow: 0 2px 24px rgba(224, 49, 49, 0.35);
+  border-bottom: 1px solid transparent;
 }
 .rr-door-bottom {
   bottom: 0;
-  border-top: 1px solid rgba(250, 82, 82, 0.6);
+  border-top: 1px solid transparent;
+}
+/* пока створки закрыты, шов невидим — красные кромки вспыхивают только в момент открытия */
+.rr-opening .rr-door-top {
+  border-bottom-color: rgba(250, 82, 82, 0.6);
+  box-shadow: 0 2px 24px rgba(224, 49, 49, 0.35);
+}
+.rr-opening .rr-door-bottom {
+  border-top-color: rgba(250, 82, 82, 0.6);
   box-shadow: 0 -2px 24px rgba(224, 49, 49, 0.35);
 }
 .rr-opening .rr-door-top {
@@ -572,22 +579,30 @@ body {
   animation: rrp-glitch-c 4.6s step-end 0.7s infinite;
 }
 @keyframes rrp-glitch-r {
-  0%, 10%, 17%, 45%, 52%, 78%, 84%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
-  11% { opacity: 0.55; transform: translateX(-6px); clip-path: inset(8% 0 62% 0); }
-  14% { opacity: 0.5; transform: translateX(5px); clip-path: inset(48% 0 28% 0); }
-  46% { opacity: 0.5; transform: translateX(7px); clip-path: inset(30% 0 44% 0); }
-  49% { opacity: 0.45; transform: translateX(-4px); clip-path: inset(66% 0 12% 0); }
-  79% { opacity: 0.5; transform: translateX(-8px); clip-path: inset(18% 0 55% 0); }
-  81% { opacity: 0.45; transform: translateX(6px); clip-path: inset(55% 0 25% 0); }
+  0%, 10%, 18%, 31%, 35%, 45%, 53%, 78%, 86%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  11% { opacity: 0.8; transform: translateX(-11px); clip-path: inset(8% 0 58% 0); }
+  14% { opacity: 0.75; transform: translate(9px, 2px); clip-path: inset(46% 0 26% 0); }
+  16% { opacity: 0.7; transform: translateX(-7px); clip-path: inset(70% 0 8% 0); }
+  32% { opacity: 0.7; transform: translateX(12px); clip-path: inset(24% 0 60% 0); }
+  46% { opacity: 0.75; transform: translate(11px, -2px); clip-path: inset(28% 0 40% 0); }
+  49% { opacity: 0.7; transform: translateX(-9px); clip-path: inset(62% 0 10% 0); }
+  51% { opacity: 0.65; transform: translateX(6px); clip-path: inset(4% 0 82% 0); }
+  79% { opacity: 0.75; transform: translateX(-13px); clip-path: inset(16% 0 52% 0); }
+  82% { opacity: 0.7; transform: translate(10px, 2px); clip-path: inset(52% 0 22% 0); }
+  84% { opacity: 0.65; transform: translateX(-6px); clip-path: inset(38% 0 46% 0); }
 }
 @keyframes rrp-glitch-c {
-  0%, 13%, 20%, 55%, 61%, 87%, 93%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
-  14% { opacity: 0.5; transform: translateX(6px); clip-path: inset(20% 0 50% 0); }
-  17% { opacity: 0.45; transform: translateX(-5px); clip-path: inset(58% 0 20% 0); }
-  56% { opacity: 0.5; transform: translateX(-7px); clip-path: inset(10% 0 70% 0); }
-  58% { opacity: 0.4; transform: translateX(4px); clip-path: inset(42% 0 38% 0); }
-  88% { opacity: 0.5; transform: translateX(8px); clip-path: inset(35% 0 42% 0); }
-  90% { opacity: 0.45; transform: translateX(-6px); clip-path: inset(72% 0 8% 0); }
+  0%, 13%, 21%, 40%, 44%, 55%, 62%, 87%, 95%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  14% { opacity: 0.75; transform: translateX(10px); clip-path: inset(18% 0 48% 0); }
+  17% { opacity: 0.7; transform: translate(-9px, -2px); clip-path: inset(56% 0 18% 0); }
+  19% { opacity: 0.65; transform: translateX(7px); clip-path: inset(2% 0 86% 0); }
+  41% { opacity: 0.7; transform: translateX(-12px); clip-path: inset(34% 0 50% 0); }
+  56% { opacity: 0.75; transform: translate(-11px, 2px); clip-path: inset(8% 0 68% 0); }
+  58% { opacity: 0.65; transform: translateX(8px); clip-path: inset(40% 0 36% 0); }
+  60% { opacity: 0.7; transform: translateX(-6px); clip-path: inset(76% 0 6% 0); }
+  88% { opacity: 0.75; transform: translateX(13px); clip-path: inset(33% 0 40% 0); }
+  91% { opacity: 0.7; transform: translate(-10px, -2px); clip-path: inset(68% 0 8% 0); }
+  93% { opacity: 0.65; transform: translateX(7px); clip-path: inset(12% 0 74% 0); }
 }
 
 /* рваные слайсы-помехи: узкие полосы арта дёргаются в стороны */
@@ -598,19 +613,25 @@ body {
   opacity: 0;
   pointer-events: none;
 }
-.rrp-slice-a { animation: rrp-slice-a 4.4s step-end 1.2s infinite; }
-.rrp-slice-b { animation: rrp-slice-b 5.2s step-end 2s infinite; }
+.rrp-slice-a { animation: rrp-slice-a 3.6s step-end 1.2s infinite; }
+.rrp-slice-b { animation: rrp-slice-b 4.5s step-end 1.9s infinite; }
 @keyframes rrp-slice-a {
-  0%, 23%, 27%, 60%, 64%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
-  24% { opacity: 1; transform: translateX(12px) skewX(-4deg); clip-path: inset(36% 0 56% 0); }
-  25.5% { opacity: 1; transform: translateX(-9px); clip-path: inset(40% 0 52% 0); }
-  61% { opacity: 1; transform: translateX(-14px) skewX(3deg); clip-path: inset(62% 0 30% 0); }
+  0%, 22%, 28%, 47%, 51%, 60%, 66%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  23% { opacity: 1; transform: translateX(20px) skewX(-5deg); clip-path: inset(36% 0 55% 0); }
+  25% { opacity: 1; transform: translateX(-15px); clip-path: inset(41% 0 51% 0); }
+  26.5% { opacity: 1; transform: translate(9px, 2px) skewX(3deg); clip-path: inset(38% 0 54% 0); }
+  48% { opacity: 1; transform: translateX(-17px) skewX(4deg); clip-path: inset(20% 0 72% 0); }
+  61% { opacity: 1; transform: translateX(-22px) skewX(4deg); clip-path: inset(60% 0 28% 0); }
+  63.5% { opacity: 1; transform: translateX(14px); clip-path: inset(64% 0 26% 0); }
 }
 @keyframes rrp-slice-b {
-  0%, 31%, 35%, 72%, 76%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
-  32% { opacity: 1; transform: translateX(-11px) skewX(3deg); clip-path: inset(12% 0 80% 0); }
-  33.5% { opacity: 1; transform: translateX(8px); clip-path: inset(16% 0 76% 0); }
-  73% { opacity: 1; transform: translateX(13px) skewX(-3deg); clip-path: inset(50% 0 42% 0); }
+  0%, 30%, 36%, 55%, 59%, 71%, 77%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  31% { opacity: 1; transform: translateX(-18px) skewX(4deg); clip-path: inset(10% 0 80% 0); }
+  33% { opacity: 1; transform: translateX(13px); clip-path: inset(14% 0 76% 0); }
+  34.5% { opacity: 1; transform: translate(-8px, -2px) skewX(-3deg); clip-path: inset(12% 0 78% 0); }
+  56% { opacity: 1; transform: translateX(19px) skewX(-4deg); clip-path: inset(46% 0 44% 0); }
+  72% { opacity: 1; transform: translateX(21px) skewX(-4deg); clip-path: inset(50% 0 40% 0); }
+  74.5% { opacity: 1; transform: translateX(-13px) skewX(2deg); clip-path: inset(54% 0 38% 0); }
 }
 
 /* живые глаза: вспышка-розжиг и вечное тление точно по глазницам арта */
