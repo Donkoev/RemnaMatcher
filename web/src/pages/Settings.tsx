@@ -206,8 +206,8 @@ export function Settings() {
       >
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
             <NumberInput
-              description="Полный цикл по всем нодам"
-              label="Опрос нод, сек"
+              description="Новый круг опроса — не чаще, чем раз в это время"
+              label="Период опроса, сек"
               min={15}
               onChange={(v) =>
                 setCfg({ ...cfg, collector: { ...cfg.collector, pollIntervalSec: Number(v) || 15 } })
