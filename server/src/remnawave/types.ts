@@ -53,12 +53,22 @@ export interface TorrentReport {
 
 export interface HwidDevice {
   hwid: string;
-  /** живая панель 2.7.4 отдаёт uuid юзера (контракт 2.7.3 обещает userId — не верить) */
-  userUuid: string;
+  /** панель 2.7.x отдаёт uuid юзера, панель 3.x — числовой id; присутствует одно из двух */
+  userUuid?: string;
+  userId?: number;
   platform: string | null;
   osVersion: string | null;
   deviceModel: string | null;
   userAgent: string | null;
+}
+
+/** Версия API панели: '2' — ветка 2.7.x, '3' — ветка 3.x (другие пути и идентификаторы) */
+export type PanelApiVersion = '2' | '3';
+
+/** Ссылка на юзера для действий: 2.7.x адресует по uuid, 3.x — по числовому id */
+export interface UserRef {
+  id: number;
+  uuid: string;
 }
 
 /** Только чтение. Коллектор получает ровно этот интерфейс и физически не может ничего изменить. */
@@ -71,17 +81,17 @@ export interface RemnaReader {
   /** Свежие репорты торрент-блокера (страница последних) */
   getTorrentReports(): Promise<TorrentReport[]>;
   /** Число HWID-устройств юзера (null — не удалось получить) */
-  getHwidDeviceCount(userUuid: string): Promise<number | null>;
+  getHwidDeviceCount(user: UserRef): Promise<number | null>;
   /** Страница общего списка HWID-устройств (HWID Inspector панели) */
   getAllHwidDevices(start: number, size: number): Promise<{ devices: HwidDevice[]; total: number }>;
 }
 
 /** Карательные действия. Вызывается ТОЛЬКО из обработчиков кнопок (TG/веб) с подтверждением. */
 export interface RemnaEnforcer {
-  disableUser(uuid: string): Promise<void>;
-  enableUser(uuid: string): Promise<void>;
+  disableUser(user: UserRef): Promise<void>;
+  enableUser(user: UserRef): Promise<void>;
   /** Перегенерация ключей: утёкший vless умирает */
-  revokeSubscription(uuid: string): Promise<void>;
+  revokeSubscription(user: UserRef): Promise<void>;
   dropConnectionsByIps(ips: string[]): Promise<void>;
-  dropConnectionsByUser(uuid: string): Promise<void>;
+  dropConnectionsByUser(user: UserRef): Promise<void>;
 }

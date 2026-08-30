@@ -361,7 +361,8 @@ export async function startApi(opts: {
       sharedWith: sharedStmt.get(d.hwid, userId)?.n ?? 0,
       blacklisted: !!blStmt.get(d.hwid),
     }));
-    const hwidCount = deviceList.length > 0 ? deviceList.length : await remna.getHwidDeviceCount(user.uuid);
+    const hwidCount =
+      deviceList.length > 0 ? deviceList.length : await remna.getHwidDeviceCount({ id: userId, uuid: user.uuid });
 
     const cfg = loadScoringConfig(db);
     const windowStart = Date.now() - cfg.activeWindowMin * 60_000;

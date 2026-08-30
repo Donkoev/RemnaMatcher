@@ -1,4 +1,4 @@
-import type { HwidDevice, NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport } from './types.js';
+import type { HwidDevice, NodeSessions, RemnaEnforcer, RemnaNode, RemnaReader, RemnaUser, TorrentReport, UserRef } from './types.js';
 
 // Мок-режим: имитирует панель по паттернам реальных данных (снятым с боевой
 // панели 2026-08-26): те же 9 нод, имена юзеров rs_*/tg_*, реальные ASN,
@@ -198,8 +198,8 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
     return { nodeUuid, success: true, users };
   }
 
-  async getHwidDeviceCount(userUuid: string): Promise<number | null> {
-    const st = [...this.users.values()].find((s) => s.user.uuid === userUuid);
+  async getHwidDeviceCount(user: UserRef): Promise<number | null> {
+    const st = [...this.users.values()].find((s) => s.user.uuid === user.uuid);
     if (!st) return null;
     const limit = st.user.hwidDeviceLimit ?? 5;
     // фродеры упираются в лимит, обычные — 1-2 устройства
@@ -253,17 +253,17 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
 
   // --- Enforcer: в моке просто меняем внутреннее состояние ---
 
-  async disableUser(uuid: string): Promise<void> {
-    this.disabled.add(uuid);
+  async disableUser(user: UserRef): Promise<void> {
+    this.disabled.add(user.uuid);
   }
 
-  async enableUser(uuid: string): Promise<void> {
-    this.disabled.delete(uuid);
+  async enableUser(user: UserRef): Promise<void> {
+    this.disabled.delete(user.uuid);
   }
 
-  async revokeSubscription(uuid: string): Promise<void> {
-    this.revoked.add(uuid);
-    const st = [...this.users.values()].find((s) => s.user.uuid === uuid);
+  async revokeSubscription(user: UserRef): Promise<void> {
+    this.revoked.add(user.uuid);
+    const st = [...this.users.values()].find((s) => s.user.uuid === user.uuid);
     if (st) st.active.clear();
   }
 
@@ -274,8 +274,8 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
     }
   }
 
-  async dropConnectionsByUser(uuid: string): Promise<void> {
-    const st = [...this.users.values()].find((s) => s.user.uuid === uuid);
+  async dropConnectionsByUser(user: UserRef): Promise<void> {
+    const st = [...this.users.values()].find((s) => s.user.uuid === user.uuid);
     if (st) st.active.clear();
   }
 }

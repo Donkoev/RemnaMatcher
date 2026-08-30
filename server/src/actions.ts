@@ -43,15 +43,15 @@ export class Actions {
     try {
       switch (action) {
         case 'revoke':
-          await this.enforcer.revokeSubscription(user.uuid);
-          await this.enforcer.dropConnectionsByUser(user.uuid);
+          await this.enforcer.revokeSubscription({ id: userId, uuid: user.uuid });
+          await this.enforcer.dropConnectionsByUser({ id: userId, uuid: user.uuid });
           this.markIncidents(userId, 'actioned');
           this.log(userId, action, source, true);
           return { ok: true, message: `🔄 Ключи ${user.username} перегенерированы, активные соединения сброшены. Утёкший vless мёртв.` };
 
         case 'disable':
-          await this.enforcer.disableUser(user.uuid);
-          await this.enforcer.dropConnectionsByUser(user.uuid);
+          await this.enforcer.disableUser({ id: userId, uuid: user.uuid });
+          await this.enforcer.dropConnectionsByUser({ id: userId, uuid: user.uuid });
           // статус локально сразу, не дожидаясь синка — отключённый тут же уходит с главной
           this.db.prepare("UPDATE users SET status = 'DISABLED' WHERE id = ?").run(userId);
           this.markIncidents(userId, 'actioned');
@@ -59,13 +59,13 @@ export class Actions {
           return { ok: true, message: `⛔ ${user.username} отключён, соединения сброшены.` };
 
         case 'enable':
-          await this.enforcer.enableUser(user.uuid);
+          await this.enforcer.enableUser({ id: userId, uuid: user.uuid });
           this.db.prepare("UPDATE users SET status = 'ACTIVE' WHERE id = ?").run(userId);
           this.log(userId, action, source, true);
           return { ok: true, message: `✅ ${user.username} снова включён.` };
 
         case 'drop':
-          await this.enforcer.dropConnectionsByUser(user.uuid);
+          await this.enforcer.dropConnectionsByUser({ id: userId, uuid: user.uuid });
           this.log(userId, action, source, true);
           return { ok: true, message: `🔌 Активные соединения ${user.username} сброшены на всех нодах.` };
 
@@ -97,8 +97,8 @@ export class Actions {
             'INSERT OR IGNORE INTO hwid_blacklist (hwid, reason, source_user_id, added_at) VALUES (?, ?, ?, ?)',
           );
           for (const d of devices) insert.run(d.hwid, `устройства ${user.username}`, userId, Date.now());
-          await this.enforcer.disableUser(user.uuid);
-          await this.enforcer.dropConnectionsByUser(user.uuid);
+          await this.enforcer.disableUser({ id: userId, uuid: user.uuid });
+          await this.enforcer.dropConnectionsByUser({ id: userId, uuid: user.uuid });
           this.db.prepare("UPDATE users SET status = 'DISABLED' WHERE id = ?").run(userId);
           this.markIncidents(userId, 'actioned');
           this.log(userId, action, source, true);

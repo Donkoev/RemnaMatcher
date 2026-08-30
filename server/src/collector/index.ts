@@ -208,7 +208,8 @@ export class Collector {
       const page = await this.remna.getAllHwidDevices(start, pageSize);
       const tx = this.db.transaction(() => {
         for (const d of page.devices) {
-          const userId = uuidToId.get(d.userUuid);
+          // панель 3.x отдаёт числовой userId, 2.7.x — uuid юзера
+          const userId = d.userId ?? (d.userUuid !== undefined ? uuidToId.get(d.userUuid) : undefined);
           if (userId === undefined) continue; // юзер ещё не в справочнике — доедет со следующим синком
           upsert.run(d.hwid, userId, d.platform, d.osVersion, d.deviceModel, d.userAgent, now, now);
           seen.add(`${d.hwid} ${userId}`);

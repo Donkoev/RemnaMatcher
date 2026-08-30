@@ -1,7 +1,7 @@
 import { env, assertLiveConfig } from './config.js';
 import { openDb } from './db/index.js';
 import { MockGeoProvider, MmdbGeoProvider, type GeoProvider } from './geo/index.js';
-import { HttpRemnaEnforcer, HttpRemnaReader } from './remnawave/http.js';
+import { HttpRemnaEnforcer, HttpRemnaReader, PanelVersionState } from './remnawave/http.js';
 import { MockRemna } from './remnawave/mock.js';
 import type { RemnaEnforcer, RemnaReader } from './remnawave/types.js';
 import { Collector } from './collector/index.js';
@@ -25,8 +25,10 @@ async function main(): Promise<void> {
   if (env.MODE === 'live') {
     assertLiveConfig(env);
     const httpOpts = { baseUrl: env.REMNAWAVE_URL, token: env.REMNAWAVE_TOKEN, secret: env.REMNAWAVE_SECRET };
-    reader = new HttpRemnaReader(httpOpts);
-    enforcer = new HttpRemnaEnforcer(httpOpts);
+    // общий детект версии панели (2.7.x/3.x): что узнал reader — знает и enforcer
+    const panelVersion = new PanelVersionState();
+    reader = new HttpRemnaReader(httpOpts, panelVersion);
+    enforcer = new HttpRemnaEnforcer(httpOpts, panelVersion);
     const mmdb = new MmdbGeoProvider(env.GEOIP_CITY_MMDB, env.GEOIP_ASN_MMDB);
     if (!mmdb.ready.city || !mmdb.ready.asn) {
       console.warn(
