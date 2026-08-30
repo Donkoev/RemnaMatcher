@@ -505,22 +505,20 @@ body {
   justify-content: center;
   animation: rr-flicker 1s steps(12) 0.2s both;
 }
-/* пульсирующее красное зарево позади арта */
+/* пульсирующее красное зарево позади арта — просвечивает сквозь прозрачные места PNG */
 .rrp-glow {
   position: absolute;
-  inset: -12%;
-  background: radial-gradient(50% 50% at 50% 46%, rgba(224, 30, 30, 0.4), rgba(150, 10, 10, 0.12) 55%, transparent 75%);
+  inset: -10%;
+  background: radial-gradient(46% 40% at 50% 42%, rgba(224, 30, 30, 0.26), rgba(150, 10, 10, 0.08) 55%, transparent 75%);
   animation: rrs-pulse 2.8s ease-in-out 1.4s infinite;
   pointer-events: none;
 }
+/* фон у PNG вырезан (чернота переведена в альфу), маска не нужна — арт висит во тьме сам */
 .rrp-img {
   position: relative;
   max-height: min(70vh, 760px);
   max-width: min(84vw, 560px);
   object-fit: contain;
-  /* края растворяются в черноту шлюза; маска широкая — сигил и руны на арте не срезаются */
-  -webkit-mask-image: radial-gradient(92% 88% at 50% 48%, #000 74%, transparent 100%);
-  mask-image: radial-gradient(92% 88% at 50% 48%, #000 74%, transparent 100%);
   /* медленный кинематографичный наезд */
   animation: rrp-zoom 9s ease-in-out 0.2s infinite alternate;
 }
