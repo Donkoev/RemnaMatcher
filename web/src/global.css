@@ -370,7 +370,7 @@ body {
 }
 .rr-glitch {
   font-family: var(--mantine-font-family-monospace);
-  font-size: clamp(28px, 5vw, 52px);
+  font-size: clamp(20px, 3.4vw, 38px);
   font-weight: 800;
   letter-spacing: 0.35em;
   text-indent: 0.35em;
@@ -436,4 +436,63 @@ body {
   0% { opacity: 0; }
   25% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* ---- череп заставки (RedRoomSkull, классы rrs-*) ---- */
+.rrs {
+  height: min(52vh, 430px);
+  aspect-ratio: 300 / 420;
+  width: auto;
+}
+/* сигил проявляется с лёгким довращением, кольца крутятся в разные стороны */
+.rrs-sigil {
+  transform-origin: 150px 160px;
+  animation: rrs-sigil-in 0.9s ease-out both;
+}
+.rrs-ring-a {
+  transform-origin: 150px 160px;
+  animation: rrs-rot 26s linear infinite;
+}
+.rrs-ring-b {
+  transform-origin: 150px 160px;
+  animation: rrs-rot-rev 34s linear infinite;
+}
+@keyframes rrs-sigil-in {
+  from { opacity: 0; transform: scale(0.9) rotate(-10deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes rrs-rot {
+  to { transform: rotate(360deg); }
+}
+@keyframes rrs-rot-rev {
+  to { transform: rotate(-360deg); }
+}
+/* череп мерцает-проявляется, как лампа под напряжением */
+.rrs-skull {
+  animation: rr-flicker 1s steps(12) 0.25s both;
+}
+/* глаза: вспышка-розжиг, затем бесконечное тление */
+.rrs-eyes {
+  animation: rrs-ignite 0.6s ease-out 0.9s both;
+}
+.rrs-eyes-pulse {
+  animation: rrs-pulse 2.4s ease-in-out 1.5s infinite;
+}
+@keyframes rrs-ignite {
+  0% { opacity: 0; }
+  55% { opacity: 1; }
+  70% { opacity: 0.45; }
+  100% { opacity: 1; }
+}
+@keyframes rrs-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+/* кровь стекает сверху вниз */
+.rrs-blood {
+  clip-path: inset(0 0 100% 0);
+  animation: rrs-bleed 1.4s ease-in 1.05s forwards;
+}
+@keyframes rrs-bleed {
+  to { clip-path: inset(0 0 -5% 0); }
 }

@@ -23,18 +23,19 @@ import {
   TbTarget,
 } from 'react-icons/tb';
 import { MetricCard } from '../components/rw/MetricCard';
+import { RedRoomSkull } from '../components/RedRoomSkull';
 import { SectionCard } from '../components/rw/SectionCard';
 
 // Красная комната: скрытый раздел-заглушка (RED_ROOM в .env).
 // Пока чистый фронт: макет из мок-данных, наполнение и логика появятся позже.
 
-// вход-анимация «шлюза»: глитч-заставка ~1.2 c, потом створки разъезжаются
+// вход-анимация: сигил с черепом собирается (~2.2 с), потом створки шлюза разъезжаются
 function EntryGate({ onDone }: { onDone: () => void }) {
   const [opening, setOpening] = useState(false);
 
   useEffect(() => {
-    const openT = setTimeout(() => setOpening(true), 1200);
-    const doneT = setTimeout(onDone, 2000);
+    const openT = setTimeout(() => setOpening(true), 2200);
+    const doneT = setTimeout(onDone, 3000);
     return () => {
       clearTimeout(openT);
       clearTimeout(doneT);
@@ -48,7 +49,7 @@ function EntryGate({ onDone }: { onDone: () => void }) {
       <div className="rr-door rr-door-top" />
       <div className="rr-door rr-door-bottom" />
       <div className="rr-splash">
-        <TbSkull color="var(--mantine-color-red-5)" size={56} />
+        <RedRoomSkull />
         <div className="rr-glitch" data-text="КРАСНАЯ КОМНАТА">
           КРАСНАЯ КОМНАТА
         </div>
