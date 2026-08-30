@@ -364,6 +364,8 @@ body {
   justify-content: center;
   gap: 14px;
   transition: opacity 0.25s ease;
+  /* встряска кадра, когда вспыхивают глаза */
+  animation: rrp-shake 0.5s linear 0.95s both;
 }
 .rr-opening .rr-splash {
   opacity: 0;
@@ -387,11 +389,26 @@ body {
 }
 .rr-glitch::before {
   color: #3bc9db;
-  animation: rr-shift-a 0.9s steps(9) both;
+  /* вход + редкие остаточные глитчи */
+  animation:
+    rr-shift-a 0.9s steps(9) both,
+    rr-tjit-a 4.8s step-end 2s infinite;
 }
 .rr-glitch::after {
   color: #ff2e2e;
-  animation: rr-shift-b 0.9s steps(9) both;
+  animation:
+    rr-shift-b 0.9s steps(9) both,
+    rr-tjit-b 5.6s step-end 2.3s infinite;
+}
+@keyframes rr-tjit-a {
+  0%, 41%, 44%, 76%, 78%, 100% { opacity: 0; }
+  42% { opacity: 0.7; transform: translate(-3px, 1px); clip-path: inset(20% 0 55% 0); }
+  77% { opacity: 0.6; transform: translate(3px, -1px); clip-path: inset(60% 0 20% 0); }
+}
+@keyframes rr-tjit-b {
+  0%, 27%, 30%, 63%, 66%, 100% { opacity: 0; }
+  28% { opacity: 0.65; transform: translate(3px, -1px); clip-path: inset(45% 0 30% 0); }
+  64% { opacity: 0.6; transform: translate(-3px, 1px); clip-path: inset(10% 0 70% 0); }
 }
 @keyframes rr-flicker {
   0%, 7% { opacity: 0; }
@@ -498,12 +515,27 @@ body {
 }
 
 /* ---- заставка с растровым артом (web/src/assets/redroom-skull.*) ---- */
+/* розжиг с помехами, затем медленный наезд; наезд на обёртке, чтобы глитчи и глаза ехали вместе с артом */
 .rrp-wrap {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: rr-flicker 1s steps(12) 0.2s both;
+  animation:
+    rrp-boot 1.1s linear both,
+    rrp-zoom 9s ease-in-out 1.1s infinite alternate;
+}
+@keyframes rrp-boot {
+  0% { opacity: 0; transform: scale(1.05); filter: brightness(2.4) contrast(1.5) saturate(0); }
+  6% { opacity: 0.9; }
+  9% { opacity: 0.1; }
+  13% { opacity: 1; filter: brightness(1.7) contrast(1.3) saturate(0.3); }
+  19% { opacity: 0.25; }
+  26% { opacity: 1; filter: brightness(1.2) contrast(1.1) saturate(0.8); }
+  34% { opacity: 0.75; }
+  42% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); filter: brightness(1) contrast(1) saturate(1); }
+}
+@keyframes rrp-zoom {
+  from { transform: scale(1); }
+  to { transform: scale(1.09); }
 }
 /* пульсирующее красное зарево позади арта — просвечивает сквозь прозрачные места PNG */
 .rrp-glow {
@@ -513,16 +545,141 @@ body {
   animation: rrs-pulse 2.8s ease-in-out 1.4s infinite;
   pointer-events: none;
 }
-/* фон у PNG вырезан (чернота переведена в альфу), маска не нужна — арт висит во тьме сам */
+/* фон у PNG вырезан (чернота переведена в альфу) — арт висит во тьме сам */
 .rrp-img {
+  display: block;
   position: relative;
   max-height: min(70vh, 760px);
   max-width: min(84vw, 560px);
   object-fit: contain;
-  /* медленный кинематографичный наезд */
-  animation: rrp-zoom 9s ease-in-out 0.2s infinite alternate;
 }
-@keyframes rrp-zoom {
-  from { transform: scale(1.02); }
-  to { transform: scale(1.1); }
+
+/* RGB-расслоение: тонированные копии арта вспыхивают сдвинутыми полосами */
+.rrp-ghost {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+}
+.rrp-ghost-r {
+  filter: sepia(1) saturate(6) hue-rotate(-45deg) brightness(0.9);
+  animation: rrp-glitch-r 3.8s step-end 0.5s infinite;
+}
+.rrp-ghost-c {
+  filter: sepia(1) saturate(5) hue-rotate(150deg) brightness(0.85);
+  animation: rrp-glitch-c 4.6s step-end 0.7s infinite;
+}
+@keyframes rrp-glitch-r {
+  0%, 10%, 17%, 45%, 52%, 78%, 84%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  11% { opacity: 0.55; transform: translateX(-6px); clip-path: inset(8% 0 62% 0); }
+  14% { opacity: 0.5; transform: translateX(5px); clip-path: inset(48% 0 28% 0); }
+  46% { opacity: 0.5; transform: translateX(7px); clip-path: inset(30% 0 44% 0); }
+  49% { opacity: 0.45; transform: translateX(-4px); clip-path: inset(66% 0 12% 0); }
+  79% { opacity: 0.5; transform: translateX(-8px); clip-path: inset(18% 0 55% 0); }
+  81% { opacity: 0.45; transform: translateX(6px); clip-path: inset(55% 0 25% 0); }
+}
+@keyframes rrp-glitch-c {
+  0%, 13%, 20%, 55%, 61%, 87%, 93%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  14% { opacity: 0.5; transform: translateX(6px); clip-path: inset(20% 0 50% 0); }
+  17% { opacity: 0.45; transform: translateX(-5px); clip-path: inset(58% 0 20% 0); }
+  56% { opacity: 0.5; transform: translateX(-7px); clip-path: inset(10% 0 70% 0); }
+  58% { opacity: 0.4; transform: translateX(4px); clip-path: inset(42% 0 38% 0); }
+  88% { opacity: 0.5; transform: translateX(8px); clip-path: inset(35% 0 42% 0); }
+  90% { opacity: 0.45; transform: translateX(-6px); clip-path: inset(72% 0 8% 0); }
+}
+
+/* рваные слайсы-помехи: узкие полосы арта дёргаются в стороны */
+.rrp-slice {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+.rrp-slice-a { animation: rrp-slice-a 4.4s step-end 1.2s infinite; }
+.rrp-slice-b { animation: rrp-slice-b 5.2s step-end 2s infinite; }
+@keyframes rrp-slice-a {
+  0%, 23%, 27%, 60%, 64%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  24% { opacity: 1; transform: translateX(12px) skewX(-4deg); clip-path: inset(36% 0 56% 0); }
+  25.5% { opacity: 1; transform: translateX(-9px); clip-path: inset(40% 0 52% 0); }
+  61% { opacity: 1; transform: translateX(-14px) skewX(3deg); clip-path: inset(62% 0 30% 0); }
+}
+@keyframes rrp-slice-b {
+  0%, 31%, 35%, 72%, 76%, 100% { opacity: 0; transform: none; clip-path: inset(0); }
+  32% { opacity: 1; transform: translateX(-11px) skewX(3deg); clip-path: inset(12% 0 80% 0); }
+  33.5% { opacity: 1; transform: translateX(8px); clip-path: inset(16% 0 76% 0); }
+  73% { opacity: 1; transform: translateX(13px) skewX(-3deg); clip-path: inset(50% 0 42% 0); }
+}
+
+/* живые глаза: вспышка-розжиг и вечное тление точно по глазницам арта */
+.rrp-eye {
+  position: absolute;
+  width: 17%;
+  height: 9%;
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 70, 40, 0.9), rgba(255, 0, 0, 0.35) 55%, transparent 78%);
+  filter: blur(6px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+  animation:
+    rrp-eye-ignite 0.5s ease-out 0.95s both,
+    rrs-pulse 2.6s ease-in-out 1.7s infinite;
+}
+.rrp-eye-l { left: 32.5%; top: 42.5%; }
+.rrp-eye-r { left: 51%; top: 42.5%; }
+@keyframes rrp-eye-ignite {
+  0% { opacity: 0; transform: scale(0.6); }
+  55% { opacity: 1; transform: scale(1.35); }
+  75% { opacity: 0.6; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* бегущий скан-луч */
+.rrp-scanline {
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, rgba(255, 60, 60, 0.65), transparent);
+  box-shadow: 0 0 12px rgba(255, 60, 60, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  animation: rrp-scan 2.6s linear 0.3s infinite;
+}
+@keyframes rrp-scan {
+  0% { top: -2%; opacity: 0; }
+  8% { opacity: 0.55; }
+  92% { opacity: 0.55; }
+  100% { top: 101%; opacity: 0; }
+}
+
+/* зерно плёнки на всей заставке */
+.rr-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.08;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  animation: rr-grain-jump 0.6s step-end infinite;
+}
+@keyframes rr-grain-jump {
+  0% { background-position: 0 0; }
+  33% { background-position: 84px 38px; }
+  66% { background-position: 32px 96px; }
+  100% { background-position: 0 0; }
+}
+
+/* встряска кадра в момент розжига глаз */
+@keyframes rrp-shake {
+  0%, 100% { transform: none; }
+  15% { transform: translate(3px, -2px); }
+  30% { transform: translate(-4px, 2px); }
+  45% { transform: translate(3px, 1px); }
+  60% { transform: translate(-2px, -2px); }
+  75% { transform: translate(2px, 1px); }
 }

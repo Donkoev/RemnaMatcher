@@ -38,18 +38,20 @@ const skullArt = import.meta.glob('../assets/redroom-skull.{png,jpg,jpeg,webp}',
 }) as Record<string, string>;
 const skullArtUrl = Object.values(skullArt)[0];
 
-// вход-анимация: череп проявляется (~2.2 с), потом створки шлюза разъезжаются
+// вход-анимация: розжиг с помехами, глитчи арта, живые глаза (~2.5 с), потом створки шлюза
 function EntryGate({ onDone }: { onDone: () => void }) {
   const [opening, setOpening] = useState(false);
 
   useEffect(() => {
-    const openT = setTimeout(() => setOpening(true), 2200);
-    const doneT = setTimeout(onDone, 3000);
+    const openT = setTimeout(() => setOpening(true), 2500);
+    const doneT = setTimeout(onDone, 3300);
     return () => {
       clearTimeout(openT);
       clearTimeout(doneT);
     };
   }, [onDone]);
+
+  const art = { backgroundImage: `url(${skullArtUrl})` };
 
   return (
     // клик — пропустить заставку и сразу открыть створки
@@ -57,11 +59,23 @@ function EntryGate({ onDone }: { onDone: () => void }) {
       <div className="rr-flash" />
       <div className="rr-door rr-door-top" />
       <div className="rr-door rr-door-bottom" />
+      <div className="rr-grain" />
       <div className="rr-splash">
         {skullArtUrl ? (
           <div className="rrp-wrap">
             <div className="rrp-glow" />
             <img alt="" className="rrp-img" src={skullArtUrl} />
+            {/* RGB-расслоение: красная и голубая копии вспыхивают сдвинутыми полосами */}
+            <div className="rrp-ghost rrp-ghost-r" style={art} />
+            <div className="rrp-ghost rrp-ghost-c" style={art} />
+            {/* рваные слайсы-помехи */}
+            <div className="rrp-slice rrp-slice-a" style={art} />
+            <div className="rrp-slice rrp-slice-b" style={art} />
+            {/* живые глаза: свечение точно по глазницам арта */}
+            <div className="rrp-eye rrp-eye-l" />
+            <div className="rrp-eye rrp-eye-r" />
+            {/* бегущий скан-луч */}
+            <div className="rrp-scanline" />
           </div>
         ) : (
           <RedRoomSkull />
