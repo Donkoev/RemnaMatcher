@@ -515,12 +515,12 @@ body {
 }
 .rrp-img {
   position: relative;
-  max-height: min(62vh, 640px);
+  max-height: min(70vh, 760px);
   max-width: min(84vw, 560px);
   object-fit: contain;
-  /* края растворяются в черноту шлюза, чтобы не было видно рамки картинки */
-  -webkit-mask-image: radial-gradient(72% 72% at 50% 50%, #000 58%, transparent 96%);
-  mask-image: radial-gradient(72% 72% at 50% 50%, #000 58%, transparent 96%);
+  /* края растворяются в черноту шлюза; маска широкая — сигил и руны на арте не срезаются */
+  -webkit-mask-image: radial-gradient(92% 88% at 50% 48%, #000 74%, transparent 100%);
+  mask-image: radial-gradient(92% 88% at 50% 48%, #000 74%, transparent 100%);
   /* медленный кинематографичный наезд */
   animation: rrp-zoom 9s ease-in-out 0.2s infinite alternate;
 }
