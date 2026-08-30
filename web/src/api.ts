@@ -10,6 +10,8 @@ export type Level = 'green' | 'yellow' | 'orange' | 'red';
 export interface Overview {
   /** окно «нода онлайн», мс — минимум 5 минут либо два цикла коллектора */
   nodeOnlineWindowMs: number;
+  /** последний завершённый круг опроса: когда закончился и сколько занял */
+  lastCycle: { at: number; durationMs: number } | null;
   mode: 'mock' | 'live';
   totals: {
     activeIps: number;

@@ -179,11 +179,11 @@ export async function startApi(opts: {
     return reply.setCookie(SESSION_COOKIE, token, cookieOpts).send({ ok: true });
   });
 
-  // длительность последнего цикла коллектора: на панелях с сотнями нод круг занимает
-  // дольше 5 минут, и «нода онлайн» должна мериться относительно реального цикла
-  let lastCycleDurationMs = 60_000;
+  // последний цикл коллектора: длительность нужна и для окна «нода онлайн»
+  // (на сотнях нод круг дольше 5 минут), и для показа реального времени опроса в UI
+  let lastCycle = { at: 0, durationMs: 60_000 };
   bus.on('cycle', (ev) => {
-    lastCycleDurationMs = ev.durationMs;
+    lastCycle = { at: ev.at, durationMs: ev.durationMs };
   });
 
   app.get('/api/overview', () => {
@@ -221,7 +221,8 @@ export async function startApi(opts: {
       levels: Object.fromEntries(levels.map((l) => [l.level, l.n])),
       nodes,
       // нода «онлайн», если опрошена в пределах двух циклов (минимум 5 минут)
-      nodeOnlineWindowMs: Math.max(300_000, lastCycleDurationMs * 2 + 60_000),
+      nodeOnlineWindowMs: Math.max(300_000, lastCycle.durationMs * 2 + 60_000),
+      lastCycle: lastCycle.at > 0 ? lastCycle : null,
     };
   });
 

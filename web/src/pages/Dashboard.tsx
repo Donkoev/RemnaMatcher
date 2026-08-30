@@ -81,6 +81,14 @@ export function Dashboard() {
   const nodesOnline = overview?.nodes.filter((n) => n.last_ok_at && Date.now() - n.last_ok_at < nodeWindow).length ?? 0;
   const nodesTotal = overview?.nodes.length ?? 0;
   const brokenNodes = overview?.nodes.filter((n) => !n.last_ok_at || Date.now() - n.last_ok_at >= nodeWindow) ?? [];
+  // человеческая длительность последнего круга опроса
+  const cycleText = overview?.lastCycle
+    ? overview.lastCycle.durationMs < 10_000
+      ? `${(overview.lastCycle.durationMs / 1000).toFixed(1)} с`
+      : overview.lastCycle.durationMs < 120_000
+        ? `${Math.round(overview.lastCycle.durationMs / 1000)} с`
+        : `${(overview.lastCycle.durationMs / 60_000).toFixed(1)} мин`
+    : null;
 
   return (
     <>
@@ -116,8 +124,8 @@ export function Dashboard() {
             label={
               brokenNodes.length > 0
                 ? `нет данных: ${brokenNodes.map((n) => n.name).join(', ')}`
-                : overview?.nodes[0]?.last_ok_at
-                  ? `опрос ${timeAgo(Math.max(...(overview?.nodes.map((n) => n.last_ok_at ?? 0) ?? [0])))}`
+                : overview?.lastCycle
+                  ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}`
                   : 'ждём первый опрос'
             }
           >
@@ -125,6 +133,7 @@ export function Dashboard() {
               <MetricCard
                 icon={<TbServer size={24} />}
                 iconColor={nodesOnline < nodesTotal ? 'red' : 'indigo'}
+                subtitle={cycleText ? `опрос за ${cycleText}` : undefined}
                 title="Нод онлайн"
                 value={overview ? `${nodesOnline}/${nodesTotal}` : '—'}
               />
