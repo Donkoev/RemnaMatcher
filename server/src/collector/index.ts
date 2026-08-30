@@ -81,8 +81,10 @@ export class Collector {
          last_err = excluded.last_err, users_seen = excluded.users_seen, ips_seen = excluded.ips_seen`,
     );
 
-    for (const node of nodes) {
-      if (this.stopped) return;
+    // Опрос параллельным пулом: job выполняется агентом на самой ноде, панель лишь
+    // брокерит — параллельность размазывает нагрузку по нодам, а не бьёт в панель.
+    // Стаггер стартов (nodePollGapMs) не даёт выстрелить все запросы одномоментно.
+    const pollNode = async (node: (typeof nodes)[number]): Promise<void> => {
       try {
         const sessions = await this.remna.fetchNodeSessions(node.uuid);
         if (!sessions.success) throw new Error('node job failed');
@@ -110,8 +112,20 @@ export class Collector {
         console.error(`[collector] node ${node.name}: ${msg}`);
         upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, msg, 0, 0);
       }
-      await sleep(cc.nodePollGapMs);
-    }
+    };
+
+    const queue = [...nodes];
+    const workers = Array.from({ length: Math.max(1, cc.nodeConcurrency) }, async (_, wi) => {
+      await sleep(wi * cc.nodePollGapMs);
+      while (!this.stopped) {
+        const node = queue.shift();
+        if (!node) return;
+        await pollNode(node);
+        await sleep(cc.nodePollGapMs);
+      }
+    });
+    await Promise.all(workers);
+    if (this.stopped) return;
 
     // репорты торрент-блокера (панель хранит последние — дедуп по id)
     try {

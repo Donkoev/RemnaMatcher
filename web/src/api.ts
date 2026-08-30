@@ -159,6 +159,7 @@ export interface ScoringConfig {
   collector: {
     pollIntervalSec: number;
     nodePollGapMs: number;
+    nodeConcurrency: number;
     userSyncIntervalSec: number;
     retentionHours: number;
   };

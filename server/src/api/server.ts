@@ -58,6 +58,7 @@ const ScoringConfigSchema = z.object({
   collector: z.object({
     pollIntervalSec: z.number().min(15).max(3600),
     nodePollGapMs: z.number().min(0).max(60_000),
+    nodeConcurrency: z.number().min(1).max(20),
     userSyncIntervalSec: z.number().min(60).max(86_400),
     retentionHours: z.number().min(6).max(720),
   }),

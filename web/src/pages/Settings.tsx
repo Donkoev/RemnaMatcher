@@ -216,8 +216,20 @@ export function Settings() {
               value={cfg.collector.pollIntervalSec}
             />
             <NumberInput
+              description="Job идёт на самой ноде — параллельность безопасна"
+              label="Параллельность опроса"
+              max={20}
+              min={1}
+              onChange={(v) =>
+                setCfg({ ...cfg, collector: { ...cfg.collector, nodeConcurrency: Number(v) || 1 } })
+              }
+              styles={alignedField}
+              suffix=" нод"
+              value={cfg.collector.nodeConcurrency}
+            />
+            <NumberInput
               decimalScale={2}
-              description="Ноды опрашиваются по очереди"
+              description="Стаггер стартов опроса нод"
               label="Пауза между нодами, сек"
               min={0}
               onChange={(v) =>
