@@ -8,6 +8,8 @@ export interface Signal {
 export type Level = 'green' | 'yellow' | 'orange' | 'red';
 
 export interface Overview {
+  /** окно «нода онлайн», мс — минимум 5 минут либо два цикла коллектора */
+  nodeOnlineWindowMs: number;
   mode: 'mock' | 'live';
   totals: {
     activeIps: number;

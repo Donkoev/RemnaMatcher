@@ -76,9 +76,11 @@ export function Dashboard() {
 
   const suspicious =
     (overview?.levels.yellow ?? 0) + (overview?.levels.orange ?? 0) + (overview?.levels.red ?? 0);
-  const nodesOnline = overview?.nodes.filter((n) => n.last_ok_at && Date.now() - n.last_ok_at < 300_000).length ?? 0;
+  // окно «нода онлайн» приходит с сервера: на панелях с сотнями нод цикл дольше 5 минут
+  const nodeWindow = overview?.nodeOnlineWindowMs ?? 300_000;
+  const nodesOnline = overview?.nodes.filter((n) => n.last_ok_at && Date.now() - n.last_ok_at < nodeWindow).length ?? 0;
   const nodesTotal = overview?.nodes.length ?? 0;
-  const brokenNodes = overview?.nodes.filter((n) => !n.last_ok_at || Date.now() - n.last_ok_at >= 300_000) ?? [];
+  const brokenNodes = overview?.nodes.filter((n) => !n.last_ok_at || Date.now() - n.last_ok_at >= nodeWindow) ?? [];
 
   return (
     <>
