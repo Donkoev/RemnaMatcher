@@ -327,15 +327,17 @@ body {
   left: 0;
   right: 0;
   height: 50%;
-  background: linear-gradient(180deg, #0c0507 0%, #140608 100%);
 }
+/* градиенты створок зеркальные: в центре цвета сходятся один в один — шва не видно */
 .rr-door-top {
   top: 0;
   border-bottom: 1px solid transparent;
+  background: linear-gradient(180deg, #0a0405 0%, #140608 100%);
 }
 .rr-door-bottom {
   bottom: 0;
   border-top: 1px solid transparent;
+  background: linear-gradient(180deg, #140608 0%, #0a0405 100%);
 }
 /* пока створки закрыты, шов невидим — красные кромки вспыхивают только в момент открытия */
 .rr-opening .rr-door-top {
