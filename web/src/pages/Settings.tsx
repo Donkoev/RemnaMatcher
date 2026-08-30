@@ -51,13 +51,6 @@ function SettingsCard({
   );
 }
 
-// одинаковая высота под лейбл (до 2 строк) и подсказку — инпуты ряда стоят по одной линии
-// (запас в пару пикселей: реальная высота двух строк 46.5/40.3)
-const alignedField = {
-  label: { alignItems: 'flex-end', display: 'flex', minHeight: 48 },
-  description: { minHeight: 42 },
-} as const;
-
 // смена пароля администратора: после успеха все сессии сбрасываются, кроме текущей
 function PasswordSection() {
   const [current, setCurrent] = useState('');
@@ -213,7 +206,6 @@ export function Settings() {
               onChange={(v) =>
                 setCfg({ ...cfg, collector: { ...cfg.collector, pollIntervalSec: Number(v) || 15 } })
               }
-              styles={alignedField}
               value={cfg.collector.pollIntervalSec}
             />
             <NumberInput
@@ -224,7 +216,6 @@ export function Settings() {
               onChange={(v) =>
                 setCfg({ ...cfg, collector: { ...cfg.collector, nodeConcurrency: Number(v) || 1 } })
               }
-              styles={alignedField}
               suffix=" нод"
               value={cfg.collector.nodeConcurrency}
             />
@@ -237,7 +228,6 @@ export function Settings() {
                 setCfg({ ...cfg, collector: { ...cfg.collector, nodePollGapMs: Math.round((Number(v) || 0) * 1000) } })
               }
               step={0.5}
-              styles={alignedField}
               value={cfg.collector.nodePollGapMs / 1000}
             />
             <NumberInput
@@ -247,7 +237,6 @@ export function Settings() {
               onChange={(v) =>
                 setCfg({ ...cfg, collector: { ...cfg.collector, userSyncIntervalSec: Number(v) || 60 } })
               }
-              styles={alignedField}
               value={cfg.collector.userSyncIntervalSec}
             />
             <NumberInput
@@ -257,7 +246,6 @@ export function Settings() {
               onChange={(v) =>
                 setCfg({ ...cfg, collector: { ...cfg.collector, retentionHours: Number(v) || 6 } })
               }
-              styles={alignedField}
               value={cfg.collector.retentionHours}
             />
           </SimpleGrid>
