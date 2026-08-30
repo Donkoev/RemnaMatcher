@@ -216,7 +216,7 @@ export function Settings() {
               value={cfg.collector.pollIntervalSec}
             />
             <NumberInput
-              description="Job идёт на самой ноде — параллельность безопасна"
+              description="Ноды начали фейлиться — уменьшите: у панели есть свой потолок"
               label="Параллельность опроса"
               max={20}
               min={1}
