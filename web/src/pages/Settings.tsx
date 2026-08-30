@@ -52,9 +52,10 @@ function SettingsCard({
 }
 
 // одинаковая высота под лейбл (до 2 строк) и подсказку — инпуты ряда стоят по одной линии
+// (запас в пару пикселей: реальная высота двух строк 46.5/40.3)
 const alignedField = {
-  label: { alignItems: 'flex-end', display: 'flex', minHeight: 46 },
-  description: { minHeight: 40 },
+  label: { alignItems: 'flex-end', display: 'flex', minHeight: 48 },
+  description: { minHeight: 42 },
 } as const;
 
 // смена пароля администратора: после успеха все сессии сбрасываются, кроме текущей
@@ -206,7 +207,7 @@ export function Settings() {
       >
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
             <NumberInput
-              description="Новый круг опроса — не чаще, чем раз в это время"
+              description="Новый круг — не чаще, чем раз в это время"
               label="Период опроса, сек"
               min={15}
               onChange={(v) =>
@@ -216,7 +217,7 @@ export function Settings() {
               value={cfg.collector.pollIntervalSec}
             />
             <NumberInput
-              description="Ноды начали фейлиться — уменьшите: у панели есть свой потолок"
+              description="Если ноды фейлятся — уменьшите"
               label="Параллельность опроса"
               max={20}
               min={1}
