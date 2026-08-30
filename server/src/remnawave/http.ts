@@ -51,9 +51,12 @@ export class HttpRemnaReader implements RemnaReader {
         response: {
           total: number;
           users: Array<
-            Omit<RemnaUser, 'usedTrafficBytes' | 'onlineAt' | 'expireAt'> & {
+            Omit<RemnaUser, 'usedTrafficBytes' | 'onlineAt' | 'expireAt' | 'uuid'> & {
               expireAt: string | null;
               userTraffic: { usedTrafficBytes: number; onlineAt: string | null };
+              /** 2.7.x отдаёт uuid; в новых версиях панели его в списке нет — есть vlessUuid */
+              uuid?: string;
+              vlessUuid?: string;
             }
           >;
         };
@@ -61,7 +64,8 @@ export class HttpRemnaReader implements RemnaReader {
       for (const u of data.response.users) {
         users.push({
           id: u.id,
-          uuid: u.uuid,
+          // фолбэк для панелей новее 2.7.x, где uuid в списке юзеров отсутствует
+          uuid: u.uuid ?? u.vlessUuid ?? u.shortUuid,
           shortUuid: u.shortUuid,
           username: u.username,
           status: u.status,
