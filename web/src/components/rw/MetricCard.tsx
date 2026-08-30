@@ -9,7 +9,10 @@ export function MetricCard({
   title,
   value,
   subtitle,
+  corner,
 }: {
+  /** чип в правом верхнем углу карточки (например, длительность опроса) */
+  corner?: React.ReactNode;
   icon: React.ReactNode;
   iconColor?: ThemeIconProps['color'];
   subtitle?: string;
@@ -17,7 +20,8 @@ export function MetricCard({
   value: number | string;
 }) {
   return (
-    <Card p="md" radius="md">
+    <Card p="md" radius="md" style={corner ? { position: 'relative' } : undefined}>
+      {corner && <div style={{ position: 'absolute', right: 10, top: 10 }}>{corner}</div>}
       <Group gap="md" wrap="nowrap">
         <ThemeIcon color={iconColor} radius="lg" size="xl" variant="soft">
           {icon}

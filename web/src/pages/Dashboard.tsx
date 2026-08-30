@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Center,
@@ -16,6 +17,7 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import {
   TbAlertTriangle,
+  TbClock,
   TbFingerprint,
   TbNetwork,
   TbRadar2,
@@ -131,9 +133,15 @@ export function Dashboard() {
           >
             <div>
               <MetricCard
+                corner={
+                  cycleText ? (
+                    <Badge color="gray" leftSection={<TbClock size={11} />} size="sm" variant="soft">
+                      {cycleText}
+                    </Badge>
+                  ) : undefined
+                }
                 icon={<TbServer size={24} />}
                 iconColor={nodesOnline < nodesTotal ? 'red' : 'indigo'}
-                subtitle={cycleText ? `опрос за ${cycleText}` : undefined}
                 title="Нод онлайн"
                 value={overview ? `${nodesOnline}/${nodesTotal}` : '—'}
               />
