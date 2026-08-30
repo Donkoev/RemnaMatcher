@@ -168,7 +168,7 @@ export function Settings() {
         subtitle="Окна активности и скорость затухания очков"
         title="Окна и затухание"
       >
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+          <SimpleGrid cols={{ base: 1, '480px': 2, '960px': 3 }} spacing="md" type="container">
             <NumberInput
               description="IP активен, пока виден в этом окне"
               label="Окно активности, мин"
@@ -198,7 +198,9 @@ export function Settings() {
         subtitle="Как часто опрашивать панель и сколько хранить сырые данные"
         title="Сбор данных"
       >
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+          {/* подписи тут длинные: пока карточке тесно для трёх колонок с текстом
+              в одну строку — раскладываем по две, поля шире */}
+          <SimpleGrid cols={{ base: 1, '480px': 2, '960px': 3 }} spacing="md" type="container">
             <NumberInput
               description="Новый круг — не чаще, чем раз в это время"
               label="Период опроса, сек"
