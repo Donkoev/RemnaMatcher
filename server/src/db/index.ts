@@ -8,21 +8,6 @@ export function openDb(dbPath: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA);
-  // мини-миграции для существующих баз
-  for (const stmt of [
-    "ALTER TABLE users ADD COLUMN traffic_limit REAL NOT NULL DEFAULT 0",
-    'ALTER TABLE users ADD COLUMN sub_url TEXT',
-    'ALTER TABLE users ADD COLUMN hwid_limit INTEGER',
-    'ALTER TABLE ip_meta ADD COLUMN refined INTEGER NOT NULL DEFAULT 0',
-    "ALTER TABLE score_state ADD COLUMN signals_seen TEXT NOT NULL DEFAULT '{}'",
-    'ALTER TABLE users ADD COLUMN description TEXT',
-  ]) {
-    try {
-      db.exec(stmt);
-    } catch {
-      // колонка уже есть
-    }
-  }
 
   // устройства (HWID) и чёрный список — добавлены позже основной схемы
   db.exec(/* sql */ `
@@ -50,7 +35,88 @@ export function openDb(dbPath: string): Database.Database {
       source_user_id INTEGER,
       added_at       INTEGER NOT NULL
     );
+
+    -- Инфраструктура: подключённые узлы (серверы).
+    -- Ноду ставит сама панель по SSH. SSH-пароль хранится ТОЛЬКО шифрованным (AES-256-GCM,
+    -- ключ в data/red-secret.key вне базы) — чтобы переустанавливать агента без повторного ввода
+    CREATE TABLE IF NOT EXISTS red_servers (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT NOT NULL,
+      address       TEXT NOT NULL,
+      port          INTEGER NOT NULL DEFAULT 22,     -- SSH-порт
+      ssh_user      TEXT NOT NULL DEFAULT 'root',
+      ssh_pass      TEXT,                            -- SSH-пароль, шифрованный (см. red/servers.ts)
+      token         TEXT NOT NULL,                   -- секрет агента (X-Agent-Token)
+      status        TEXT NOT NULL DEFAULT 'never',   -- never|online|offline (TCP-доступность)
+      agent_status  TEXT NOT NULL DEFAULT 'none',    -- none|installing|connected|error
+      agent_port    INTEGER,                         -- порт агента на ноде
+      agent_fp      TEXT,                            -- SHA-256 отпечаток TLS-сертификата агента; NULL — старый агент по HTTP
+      last_error    TEXT,
+      os            TEXT,
+      kernel        TEXT,
+      cpu           TEXT,
+      cores         INTEGER,
+      mem_mb        INTEGER,
+      disk_free     TEXT,
+      latency_ms    INTEGER,
+      last_check_at INTEGER,
+      last_ok_at    INTEGER,
+      created_at    INTEGER NOT NULL
+    );
+
+    -- Инфраструктура → конфигурации: импортированные подписки (как в Happ).
+    -- servers — JSON списка серверов, разобранного из тела подписки
+    -- (ссылки vless/vmess/trojan/ss либо JSON-конфиги xray с балансировщиками)
+    CREATE TABLE IF NOT EXISTS red_subscriptions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT NOT NULL,
+      url           TEXT NOT NULL,
+      servers       TEXT NOT NULL DEFAULT '[]',
+      server_count  INTEGER NOT NULL DEFAULT 0,
+      last_error    TEXT,
+      traffic_used  INTEGER,                        -- байт потрачено (upload+download из subscription-userinfo)
+      traffic_total INTEGER,                        -- лимит в байтах; 0 = безлимит
+      expire_at     INTEGER,                        -- срок подписки, мс
+      updated_at    INTEGER,
+      created_at    INTEGER NOT NULL
+    );
   `);
+
+  // мини-миграции для существующих баз — строго ПОСЛЕ всех CREATE TABLE:
+  // на свежей базе таблицы уже с полным набором колонок, и ALTER просто скажет «колонка есть»
+  for (const stmt of [
+    "ALTER TABLE users ADD COLUMN traffic_limit REAL NOT NULL DEFAULT 0",
+    'ALTER TABLE users ADD COLUMN sub_url TEXT',
+    'ALTER TABLE users ADD COLUMN hwid_limit INTEGER',
+    'ALTER TABLE ip_meta ADD COLUMN refined INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE score_state ADD COLUMN signals_seen TEXT NOT NULL DEFAULT '{}'",
+    'ALTER TABLE users ADD COLUMN description TEXT',
+    // красная комната: SSH-установка ноды и факты о сервере
+    "ALTER TABLE red_servers ADD COLUMN ssh_user TEXT NOT NULL DEFAULT 'root'",
+    'ALTER TABLE red_servers ADD COLUMN os TEXT',
+    'ALTER TABLE red_servers ADD COLUMN kernel TEXT',
+    'ALTER TABLE red_servers ADD COLUMN cpu TEXT',
+    'ALTER TABLE red_servers ADD COLUMN cores INTEGER',
+    'ALTER TABLE red_servers ADD COLUMN mem_mb INTEGER',
+    'ALTER TABLE red_servers ADD COLUMN disk_free TEXT',
+    "ALTER TABLE red_servers ADD COLUMN agent_status TEXT NOT NULL DEFAULT 'none'",
+    'ALTER TABLE red_servers ADD COLUMN last_error TEXT',
+    'ALTER TABLE red_servers ADD COLUMN agent_port INTEGER',
+    'ALTER TABLE red_servers ADD COLUMN ssh_pass TEXT', // сохранённый SSH-пароль (шифрованный) — чтобы не вводить повторно
+    'ALTER TABLE red_servers ADD COLUMN agent_fp TEXT', // SHA-256 отпечаток TLS-сертификата агента (пин)
+    // конфигурации: трафик и срок подписки из заголовка subscription-userinfo (как в Happ)
+    'ALTER TABLE red_subscriptions ADD COLUMN traffic_used INTEGER',
+    'ALTER TABLE red_subscriptions ADD COLUMN traffic_total INTEGER',
+    'ALTER TABLE red_subscriptions ADD COLUMN expire_at INTEGER',
+  ]) {
+    try {
+      db.exec(stmt);
+    } catch (err) {
+      // «колонка уже есть» — норма для существующей базы; всё остальное (битый файл,
+      // залоченная БД) должно падать здесь, а не всплывать позже непонятной ошибкой
+      if (!/duplicate column name/i.test(err instanceof Error ? err.message : String(err))) throw err;
+    }
+  }
   return db;
 }
 

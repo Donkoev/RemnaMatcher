@@ -1,8 +1,21 @@
 import { useEffect, useMemo } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { ActionIcon, AppShell, Badge, Burger, Group, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { ActionIcon, AppShell, Badge, Burger, Button, Group, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
-import { TbDeviceMobileOff, TbGavel, TbHeart, TbHistory, TbLogout, TbRadar2, TbSettings, TbSkull } from 'react-icons/tb';
+import {
+  TbDeviceMobileOff,
+  TbDoorExit,
+  TbFileImport,
+  TbGauge,
+  TbGavel,
+  TbHeart,
+  TbHistory,
+  TbLogout,
+  TbRadar2,
+  TbServer2,
+  TbSettings,
+  TbSkull,
+} from 'react-icons/tb';
 import { PiShieldCheckeredDuotone } from 'react-icons/pi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, authApi } from './api';
@@ -11,7 +24,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
 import { Hwid } from './pages/Hwid';
 import { Punished } from './pages/Punished';
-import { RedRoom } from './pages/RedRoom';
+import { NodePanel } from './pages/NodePanel';
 import { Settings } from './pages/Settings';
 import { Whitelist } from './pages/Whitelist';
 import { UserModalContext, userModalController } from './userModal';
@@ -41,6 +54,7 @@ const NAV_SECTIONS: { title: string; items: { to: string; label: string; Icon: R
 export function App() {
   const qc = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure();
   const [desktopNavOpened, { toggle: toggleDesktopNav }] = useDisclosure(true);
   const isMobile = useMediaQuery('(max-width: 48em)');
@@ -64,6 +78,38 @@ export function App() {
 
   const modalCtx = useMemo(() => ({ openUser: (id: number) => userModalController.open(id) }), []);
   const newIncidents = overview?.totals.newIncidents ?? 0;
+  // режим инфраструктуры: внутри раздела узлов вся оболочка преображается — как отдельная панель
+  const nodeMode = location.pathname.startsWith('/nodes') && Boolean(overview?.nodePanel);
+
+  // вход в раздел инфраструктуры — набрать кодовое слово SSS (физические клавиши —
+  // работает на любой раскладке); повторный набор внутри выкидывает обратно в панель
+  useEffect(() => {
+    if (!overview?.nodePanel) return;
+    const SEQ = ['KeyS', 'KeyS', 'KeyS'];
+    let buf: string[] = [];
+    let lastTs = 0;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // не-буква или пауза дольше 1.5 c сбрасывают набор — слово надо ввести подряд
+      if (!/^Key[A-Z]$/.test(e.code)) {
+        buf = [];
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTs > 1500) buf = [];
+      lastTs = now;
+      buf.push(e.code);
+      if (buf.length > SEQ.length) buf.shift();
+      if (SEQ.every((c, i) => buf[i] === c)) {
+        buf = [];
+        void navigate(location.pathname.startsWith('/nodes') ? '/' : '/nodes');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [overview?.nodePanel, location.pathname, navigate]);
 
   return (
     <UserModalContext.Provider value={modalCtx}>
@@ -91,8 +137,87 @@ export function App() {
           </Group>
         </AppShell.Header>
 
-        <AppShell.Navbar className="rw-sidebar" p="md" withBorder={false}>
-          <Stack gap="lg" h="100%">
+        <AppShell.Navbar className={nodeMode ? 'rw-sidebar rw-sidebar-red' : 'rw-sidebar'} p="md" withBorder={false}>
+          {nodeMode ? (
+            // ---- режим инфраструктуры: свой сайдбар, обычные кнопки скрыты ----
+            <Stack gap="lg" h="100%" key="red">
+              <div className="rw-logo-section">
+                <Group gap="sm" justify="center" wrap="nowrap">
+                  <Burger
+                    hiddenFrom="sm"
+                    onClick={closeNav}
+                    opened
+                    size="sm"
+                    style={{ position: 'absolute', left: 4 }}
+                  />
+                  <ThemeIcon color="red" radius="md" size={40} variant="soft">
+                    <TbSkull size={26} />
+                  </ThemeIcon>
+                  <Stack gap={0}>
+                    <Text c="red.3" fw={700} fz="lg" lh={1.1}>
+                      Инфраструктура
+                    </Text>
+                    <Text c="dimmed" fz="xs">
+                      узлы RemnaMatcher
+                    </Text>
+                  </Stack>
+                </Group>
+              </div>
+
+              <Stack gap="md">
+                <div>
+                  <div className="rw-section-title rw-section-title-red">Управление</div>
+                  <Stack gap={4}>
+                    <NavLink
+                      className="rw-nav-link rw-nav-link-red"
+                      data-active={location.pathname.startsWith('/nodes/servers') || undefined}
+                      onClick={closeNav}
+                      to="/nodes/servers"
+                    >
+                      <TbServer2 />
+                      <span style={{ flex: 1 }}>Серверы</span>
+                    </NavLink>
+                    <NavLink
+                      className="rw-nav-link rw-nav-link-red"
+                      data-active={location.pathname.startsWith('/nodes/configs') || undefined}
+                      onClick={closeNav}
+                      to="/nodes/configs"
+                    >
+                      <TbFileImport />
+                      <span style={{ flex: 1 }}>Конфигурации</span>
+                    </NavLink>
+                    <NavLink
+                      className="rw-nav-link rw-nav-link-red"
+                      data-active={location.pathname.startsWith('/nodes/speedtest') || undefined}
+                      onClick={closeNav}
+                      to="/nodes/speedtest"
+                    >
+                      <TbGauge />
+                      <span style={{ flex: 1 }}>Speedtest</span>
+                    </NavLink>
+                    {/* будущие разделы добавятся сюда по мере готовности */}
+                  </Stack>
+                </div>
+              </Stack>
+
+              <div style={{ flexGrow: 1 }} />
+
+              {/* выход из раздела — обратно в обычную панель */}
+              <Button
+                color="red"
+                fullWidth
+                leftSection={<TbDoorExit size={18} />}
+                onClick={() => {
+                  closeNav();
+                  void navigate('/');
+                }}
+                variant="soft"
+              >
+                Вернуться в панель
+              </Button>
+            </Stack>
+          ) : (
+          <Stack gap="lg" h="100%" key="normal">
             <div className="rw-logo-section">
               <Group gap="sm" justify="center" wrap="nowrap">
                 <Burger
@@ -141,25 +266,6 @@ export function App() {
                   </Stack>
                 </div>
               ))}
-
-              {/* Красная комната: скрытая секция, видна только при RED_ROOM в .env */}
-              {overview?.redRoom && (
-                <div>
-                  <div className="rw-section-title rw-section-title-red">Спецотдел</div>
-                  <Stack gap={4}>
-                    <NavLink
-                      className="rw-nav-link rw-nav-link-red"
-                      data-active={location.pathname === '/redroom' || undefined}
-                      onClick={closeNav}
-                      to="/redroom"
-                    >
-                      <TbSkull />
-                      <span style={{ flex: 1 }}>Красная комната</span>
-                      <span className="rr-pulse-dot" />
-                    </NavLink>
-                  </Stack>
-                </div>
-              )}
             </Stack>
 
             <div style={{ flexGrow: 1 }} />
@@ -191,6 +297,7 @@ export function App() {
               </Tooltip>
             </Group>
           </Stack>
+          )}
         </AppShell.Navbar>
 
         <AppShell.Main pt="calc(var(--app-shell-header-height) + 12px)">
@@ -201,7 +308,7 @@ export function App() {
             <Route element={<Whitelist />} path="/whitelist" />
             <Route element={<Hwid />} path="/hwid" />
             <Route element={<Settings />} path="/settings" />
-            {overview?.redRoom && <Route element={<RedRoom />} path="/redroom" />}
+            {overview?.nodePanel && <Route element={<NodePanel />} path="/nodes/*" />}
           </Routes>
         </AppShell.Main>
       </AppShell>

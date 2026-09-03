@@ -2,7 +2,7 @@
 
 Антифрод для [Remnawave](https://remna.st): выявляет пользователей, которые раздают свои vless-подписки третьим лицам. Веб-панель в стиле Remnawave, уведомления и действия в Telegram.
 
-![release](https://img.shields.io/github/v/release/Donkoev/RemnaMatcher) ![license](https://img.shields.io/badge/panel-Remnawave%202.7.x-1fb6c1)
+![release](https://img.shields.io/github/v/release/Donkoev/RemnaMatcher) ![ci](https://img.shields.io/github/actions/workflow/status/Donkoev/RemnaMatcher/ci.yml?label=ci) ![license](https://img.shields.io/badge/panel-Remnawave%202.7.x-1fb6c1)
 
 ## Возможности
 
@@ -10,14 +10,17 @@
 - Сигналы: одновременные IP, всплеск трафика, разные провайдеры и страны, датацентры, торрент-блокер
 - Карточки подозрительных в стиле «Обозревателя сессий», полный отчёт по пользователю
 - Действия: revoke ключей, отключение, сброс соединений, белый список — только вручную, с подтверждением
+- Чёрный список HWID: устройство из бана всплыло в другой подписке — автоматическое отключение (отключаемо)
 - Telegram-бот: алерты с кнопками, дайджесты, кулдаун
 - Авторизация, самообновление из панели, все настройки меняются на лету
 
 ## Как работает
 
-Коллектор опрашивает ноды через тот же API, что и «Обозреватель сессий» панели, и собирает наблюдения «пользователь → IP» в SQLite. Панель он не изменяет — только читает.
+Коллектор опрашивает ноды через тот же API, что и «Обозреватель сессий» панели, и собирает наблюдения «пользователь → IP» в SQLite. Панель он не изменяет — только читает. Ноды, отвалившиеся от панели, пропускаются до возвращения на связь; пользователи, удалённые из панели, удаляются и из локальной базы.
 
 Каждый цикл по активным IP считаются сигналы. Главный — число одновременных IP: порог персональный, HWID-лимит пользователя × запас на устройство. Очки суммируются в уровень (🟡 → 🟠 → 🔴) и затухают со временем; в интерфейсе отображается вероятность утечки. При выходе на оранжевый уровень бот присылает алерт с кнопками действий.
+
+Скорость трафика считается по соседним снапшотам счётчика панели: месячный сброс счётчика не превращается в ложный «всплеск».
 
 География определяется офлайн-базами DB-IP, города уточняются через ipinfo.io.
 
@@ -41,8 +44,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Donkoev/RemnaMatcher/main/in
 | `REMNAWAVE_TOKEN` | API-токен панели |
 | `REMNAWAVE_SECRET` | секрет nginx-защиты `key=value`, если используется |
 | `TELEGRAM_BOT_TOKEN` | токен бота |
-| `TELEGRAM_ADMIN_CHAT_ID` | chat id администратора |
+| `TELEGRAM_ADMIN_CHAT_ID` | chat id администратора; без него бот никому не отвечает, кроме `/start` |
 | `IPINFO_TOKEN` | токен ipinfo.io, опционально |
+| `PORT` | порт панели (по умолчанию 3300); установщик дублирует его в `.env` в корне проекта для docker compose |
+
+Панель доверяет заголовку `X-Forwarded-For` только от localhost и docker-сетей — reverse-proxy должен стоять на том же хосте (так делает установщик).
 
 ## Разработка
 
@@ -50,9 +56,15 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Donkoev/RemnaMatcher/main/in
 npm install
 npm run dev:server   # API + коллектор + бот, порт 3300
 npm run dev:web      # веб-панель, http://localhost:5173
+npm run typecheck    # типы обоих воркспейсов
+npm run lint         # eslint по серверу и вебу
+npm test             # юнит-тесты сервера (vitest)
+npm run build        # server → dist, web → dist
 ```
 
 `MODE=mock` в `server/.env` запускает систему на сгенерированных данных, без подключения к панели. GeoIP-базы для live-режима: `npm run -w server geoip`.
+
+CI (`.github/workflows/ci.yml`) гоняет typecheck, lint, тесты и сборку на каждый push; образ в ghcr собирается по тегу `vX.Y.Z`. В продакшен-образе только скомпилированный JS и production-зависимости.
 
 ## Структура проекта
 
@@ -66,13 +78,14 @@ RemnaMatcher/
 │   │   ├── geo/             GeoIP/ASN, датацентры, уточнение городов
 │   │   ├── alerts/          Telegram-бот
 │   │   ├── remnawave/       клиент API панели (чтение и действия)
-│   │   └── db/              схема SQLite и миграции
-│   └── scripts/             загрузка GeoIP-баз
+│   │   ├── db/              схема SQLite и миграции
+│   │   └── scripts/         загрузка GeoIP-баз
+│   └── test/                юнит-тесты (vitest)
 ├── web/                     панель: React + Vite + Mantine
 │   └── src/
 │       ├── pages/           Обзор, Журнал, Списки, Настройки
 │       └── components/      карточки, отчёт пользователя, формы
-├── .github/workflows/       сборка Docker-образа в ghcr
+├── .github/workflows/       ci (typecheck, тесты, сборка) и docker (образ в ghcr)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── install.sh               интерактивный установщик

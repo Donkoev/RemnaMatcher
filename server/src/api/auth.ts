@@ -13,6 +13,9 @@ const scrypt = promisify(scryptCb) as (
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
 const KEYLEN = 64;
 const SESSION_TTL_MS = 7 * 24 * 3600_000;
+// счётчик неудачных логинов по IP забывается через час тишины
+const FAILS_TTL_MS = 3600_000;
+const CLEANUP_INTERVAL_MS = 3600_000;
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
@@ -43,7 +46,7 @@ const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex
  * Перебор пароля душится прогрессирующей блокировкой по IP.
  */
 export class Auth {
-  private fails = new Map<string, { count: number; lockedUntil: number }>();
+  private fails = new Map<string, { count: number; lockedUntil: number; lastAt: number }>();
 
   constructor(private db: Database.Database) {
     this.db.exec(`CREATE TABLE IF NOT EXISTS sessions (
@@ -53,7 +56,17 @@ export class Auth {
       ip TEXT,
       user_agent TEXT
     )`);
-    this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
+    this.cleanup();
+    // протухшие сессии и старые счётчики неудач не должны копиться до перезапуска
+    setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS).unref();
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
+    for (const [ip, f] of this.fails) {
+      if (f.lockedUntil < now && now - f.lastAt > FAILS_TTL_MS) this.fails.delete(ip);
+    }
   }
 
   hasPassword(): boolean {
@@ -115,8 +128,9 @@ export class Auth {
   }
 
   registerFail(ip: string): void {
-    const f = this.fails.get(ip) ?? { count: 0, lockedUntil: 0 };
+    const f = this.fails.get(ip) ?? { count: 0, lockedUntil: 0, lastAt: 0 };
     f.count += 1;
+    f.lastAt = Date.now();
     // с 5-й неудачи — блокировка 30с, каждая следующая удваивает (потолок 1 час)
     if (f.count >= 5) {
       const lockMs = Math.min(30_000 * 2 ** (f.count - 5), 3600_000);

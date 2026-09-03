@@ -149,10 +149,18 @@ TELEGRAM_ADMIN_CHAT_ID=${TG_CHAT}            # chat id администрато�
 EOF
   chmod 600 "$ENV_FILE"
   ok "Конфиг записан в ${ENV_FILE}"
-
-  # порт в docker-compose
-  sed -i "s/127\.0\.0\.1:[0-9]*:[0-9]*/127.0.0.1:${PORT}:${PORT}/" docker-compose.yml
 fi
+
+# Порт для docker compose: файл compose подставляет ${PORT} из .env в корне проекта.
+# Отслеживаемые файлы не правим — иначе git pull при самообновлении падал бы на конфликте
+PORT_NOW=$(grep -oP '^PORT=\K[0-9]+' "$ENV_FILE" || echo 3300)
+if grep -q '^PORT=' .env 2>/dev/null; then
+  sed -i "s/^PORT=.*/PORT=${PORT_NOW}/" .env
+else
+  echo "PORT=${PORT_NOW}" >> .env
+fi
+# старые установки правили порт прямо в docker-compose.yml — возвращаем файл к репозиторному виду
+git checkout -- docker-compose.yml 2>/dev/null || true
 
 # --- запуск: пробуем готовый образ из ghcr, нет — собираем на месте ---
 say ""
@@ -185,8 +193,6 @@ EOF
 systemctl daemon-reload
 systemctl enable --now remnamatcher-updater.timer >/dev/null 2>&1
 ok "Самообновление включено (кнопка «Обновить» в панели)"
-
-PORT_NOW=$(grep -oP 'PORT=\K[0-9]+' "$ENV_FILE" || echo 3300)
 
 # --- реверс-прокси: nginx + Let's Encrypt (опционально) ---
 PROXY_DOMAIN=""

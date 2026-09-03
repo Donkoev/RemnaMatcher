@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { GeoProvider } from '../geo/index.js';
+import type { GeoProvider, IpMeta } from '../geo/index.js';
 import { bus } from '../events.js';
 import {
   computeSignals,
@@ -19,28 +19,93 @@ interface ObsRow {
   nodes: string;
 }
 
+interface MetaRow {
+  ip: string;
+  asn: number | null;
+  asn_org: string | null;
+  country: string | null;
+  city: string | null;
+  lat: number | null;
+  lon: number | null;
+  is_dc: number;
+}
+
+interface PrevState {
+  user_id: number;
+  score: number;
+  level: Level;
+  updated_at: number;
+  signals_seen: string;
+}
+
 export class ScoringEngine {
   private lastAlertAt = new Map<number, { at: number; level: Level }>();
+
+  // prepared statements готовятся один раз: движок дёргает их на каждый IP и юзера
+  // каждый цикл — на 10k+ юзеров это десятки тысяч вызовов в минуту
+  private readonly stmt: {
+    activeObs: Database.Statement<[number], ObsRow>;
+    prevStates: Database.Statement<[], PrevState>;
+    whitelist: Database.Statement<[], { user_id: number }>;
+    hwidLimits: Database.Statement<[], { id: number; hwid_limit: number | null }>;
+    upsertState: Database.Statement<[number, number, string, string, number, number, string]>;
+    deleteState: Database.Statement<[number]>;
+    metaGet: Database.Statement<[string], MetaRow>;
+    metaPut: Database.Statement<[string, number | null, string | null, string | null, string | null, number | null, number | null, number, number]>;
+    torrentBlocks: Database.Statement<[number, number], { n: number }>;
+    trafficPoints: Database.Statement<[number, number], { ts: number; used: number }>;
+    lastIncident: Database.Statement<[number], { created_at: number; level: Level }>;
+    username: Database.Statement<[number], { username: string }>;
+    insertIncident: Database.Statement<[number, number, string, number, string]>;
+  };
 
   constructor(
     private db: Database.Database,
     private geo: GeoProvider,
     private getConfig: () => ScoringConfig,
-  ) {}
+  ) {
+    this.stmt = {
+      activeObs: db.prepare(
+        `SELECT user_id, ip, MAX(last_seen) AS last_seen, GROUP_CONCAT(DISTINCT node_uuid) AS nodes
+         FROM ip_observations
+         WHERE last_seen >= ?
+         GROUP BY user_id, ip`,
+      ),
+      prevStates: db.prepare('SELECT user_id, score, level, updated_at, signals_seen FROM score_state'),
+      whitelist: db.prepare('SELECT user_id FROM whitelist'),
+      hwidLimits: db.prepare('SELECT id, hwid_limit FROM users'),
+      upsertState: db.prepare(
+        `INSERT INTO score_state (user_id, score, level, signals, active_ips, updated_at, signals_seen)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           score = excluded.score, level = excluded.level, signals = excluded.signals,
+           active_ips = excluded.active_ips, updated_at = excluded.updated_at,
+           signals_seen = excluded.signals_seen`,
+      ),
+      deleteState: db.prepare('DELETE FROM score_state WHERE user_id = ?'),
+      metaGet: db.prepare('SELECT * FROM ip_meta WHERE ip = ?'),
+      metaPut: db.prepare(
+        `INSERT OR REPLACE INTO ip_meta (ip, asn, asn_org, country, city, lat, lon, is_dc, resolved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ),
+      torrentBlocks: db.prepare('SELECT COUNT(*) AS n FROM torrent_reports WHERE user_id = ? AND created_at >= ?'),
+      trafficPoints: db.prepare('SELECT ts, used FROM traffic_snapshots WHERE user_id = ? AND ts >= ? ORDER BY ts'),
+      lastIncident: db.prepare(
+        'SELECT created_at, level FROM incidents WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+      ),
+      username: db.prepare('SELECT username FROM users WHERE id = ?'),
+      insertIncident: db.prepare(
+        'INSERT INTO incidents (user_id, created_at, level, score, signals) VALUES (?, ?, ?, ?, ?)',
+      ),
+    };
+  }
 
   /** Прогон скоринга по всем юзерам с активными IP. Вызывается после каждого цикла опроса нод. */
   run(now = Date.now()): void {
     const cfg = this.getConfig();
     const windowStart = now - cfg.activeWindowMin * 60_000;
 
-    const rows = this.db
-      .prepare<[number], ObsRow>(
-        `SELECT user_id, ip, MAX(last_seen) AS last_seen, GROUP_CONCAT(DISTINCT node_uuid) AS nodes
-         FROM ip_observations
-         WHERE last_seen >= ?
-         GROUP BY user_id, ip`,
-      )
-      .all(windowStart);
+    const rows = this.stmt.activeObs.all(windowStart);
 
     const byUser = new Map<number, ActiveIp[]>();
     for (const r of rows) {
@@ -51,31 +116,11 @@ export class ScoringEngine {
     }
 
     const decayPerMs = Math.LN2 / (cfg.decayHalfLifeHours * 3600_000);
-    const prevStates = this.db
-      .prepare<[], { user_id: number; score: number; level: Level; updated_at: number; signals_seen: string }>(
-        'SELECT user_id, score, level, updated_at, signals_seen FROM score_state',
-      )
-      .all();
+    const prevStates = this.stmt.prevStates.all();
     const prevByUser = new Map(prevStates.map((s) => [s.user_id, s]));
-    const whitelisted = new Set(
-      this.db.prepare<[], { user_id: number }>('SELECT user_id FROM whitelist').all().map((w) => w.user_id),
-    );
+    const whitelisted = new Set(this.stmt.whitelist.all().map((w) => w.user_id));
     // HWID-лимиты для персонального порога числа IP
-    const hwidLimits = new Map(
-      this.db
-        .prepare<[], { id: number; hwid_limit: number | null }>('SELECT id, hwid_limit FROM users')
-        .all()
-        .map((u) => [u.id, u.hwid_limit]),
-    );
-
-    const upsert = this.db.prepare(
-      `INSERT INTO score_state (user_id, score, level, signals, active_ips, updated_at, signals_seen)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET
-         score = excluded.score, level = excluded.level, signals = excluded.signals,
-         active_ips = excluded.active_ips, updated_at = excluded.updated_at,
-         signals_seen = excluded.signals_seen`,
-    );
+    const hwidLimits = new Map(this.stmt.hwidLimits.all().map((u) => [u.id, u.hwid_limit]));
 
     // память о сработавших проверках: живёт, пока их очки не затухли до нуля —
     // из неё в отчёте видно, ПОЧЕМУ уровень ещё держится, когда текущие проверки чистые
@@ -141,8 +186,8 @@ export class ScoringEngine {
         const score = tailScore(seen, now);
         const level = levelFor(score, cfg);
 
-        upsert.run(userId, score, level, JSON.stringify(signals), ips.length, now, JSON.stringify(seen));
-        this.maybeRaiseIncident(userId, level, (prev?.level ?? 'green') as Level, score, signals, ips.length, whitelisted, cfg, now);
+        this.stmt.upsertState.run(userId, score, level, JSON.stringify(signals), ips.length, now, JSON.stringify(seen));
+        this.maybeRaiseIncident(userId, level, prev?.level ?? 'green', score, signals, ips.length, whitelisted, cfg, now);
       }
 
       // юзеры без активных IP: только затухание (и то же самоисцеление)
@@ -153,21 +198,17 @@ export class ScoringEngine {
         mergeSeen(seen, [], now);
         const score = tailScore(seen, now);
         if (score < 1) {
-          this.db.prepare('DELETE FROM score_state WHERE user_id = ?').run(prev.user_id);
+          this.stmt.deleteState.run(prev.user_id);
         } else {
-          upsert.run(prev.user_id, score, levelFor(score, cfg), '[]', 0, now, JSON.stringify(seen));
+          this.stmt.upsertState.run(prev.user_id, score, levelFor(score, cfg), '[]', 0, now, JSON.stringify(seen));
         }
       }
     });
     tx();
   }
 
-  private resolveMeta(ip: string, now: number) {
-    const cached = this.db
-      .prepare<[string], { ip: string; asn: number | null; asn_org: string | null; country: string | null; city: string | null; lat: number | null; lon: number | null; is_dc: number }>(
-        'SELECT * FROM ip_meta WHERE ip = ?',
-      )
-      .get(ip);
+  private resolveMeta(ip: string, now: number): IpMeta {
+    const cached = this.stmt.metaGet.get(ip);
     if (cached) {
       return {
         ip,
@@ -181,38 +222,33 @@ export class ScoringEngine {
       };
     }
     const meta = this.geo.lookup(ip);
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO ip_meta (ip, asn, asn_org, country, city, lat, lon, is_dc, resolved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(ip, meta.asn, meta.asnOrg, meta.country, meta.city, meta.lat, meta.lon, meta.isDatacenter ? 1 : 0, now);
+    this.stmt.metaPut.run(ip, meta.asn, meta.asnOrg, meta.country, meta.city, meta.lat, meta.lon, meta.isDatacenter ? 1 : 0, now);
     return meta;
   }
 
   private torrentBlocks24h(userId: number, now: number): number {
-    return (
-      this.db
-        .prepare<[number, number], { n: number }>(
-          'SELECT COUNT(*) AS n FROM torrent_reports WHERE user_id = ? AND created_at >= ?',
-        )
-        .get(userId, now - 24 * 3600_000)?.n ?? 0
-    );
+    return this.stmt.torrentBlocks.get(userId, now - 24 * 3600_000)?.n ?? 0;
   }
 
-  /** Средняя скорость трафика юзера за последний час, байт/сек */
+  /**
+   * Средняя скорость трафика юзера за последний час, байт/сек.
+   * Считается по соседним снапшотам в хронологии: отрицательная дельта — панель обнулила
+   * счётчик (месячный сброс), такой интервал выкидывается, а не превращается в ложный
+   * «всплеск» из разницы max − min.
+   */
   private trafficRate(userId: number, now: number): number | null {
-    const hourAgo = now - 3600_000;
-    const row = this.db
-      .prepare<[number, number], { minUsed: number; maxUsed: number; minTs: number; maxTs: number; n: number }>(
-        `SELECT MIN(used) AS minUsed, MAX(used) AS maxUsed, MIN(ts) AS minTs, MAX(ts) AS maxTs, COUNT(*) AS n
-         FROM traffic_snapshots WHERE user_id = ? AND ts >= ?`,
-      )
-      .get(userId, hourAgo);
-    if (!row || row.n < 2 || row.maxTs === row.minTs) return null;
-    const delta = row.maxUsed - row.minUsed;
-    if (delta <= 0) return 0;
-    return delta / ((row.maxTs - row.minTs) / 1000);
+    const points = this.stmt.trafficPoints.all(userId, now - 3600_000);
+    if (points.length < 2) return null;
+    let bytes = 0;
+    let secs = 0;
+    for (let i = 1; i < points.length; i++) {
+      const delta = points[i]!.used - points[i - 1]!.used;
+      const dt = (points[i]!.ts - points[i - 1]!.ts) / 1000;
+      if (delta < 0 || dt <= 0) continue;
+      bytes += delta;
+      secs += dt;
+    }
+    return secs > 0 ? bytes / secs : null;
   }
 
   private maybeRaiseIncident(
@@ -233,11 +269,7 @@ export class ScoringEngine {
     // кэш в памяти + fallback на БД, чтобы рестарт не приводил к повторной волне алертов
     let last = this.lastAlertAt.get(userId);
     if (!last) {
-      const row = this.db
-        .prepare<[number], { created_at: number; level: Level }>(
-          'SELECT created_at, level FROM incidents WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
-        )
-        .get(userId);
+      const row = this.stmt.lastIncident.get(userId);
       if (row) {
         last = { at: row.created_at, level: row.level };
         this.lastAlertAt.set(userId, last);
@@ -246,15 +278,9 @@ export class ScoringEngine {
     const levelRose = !last || LEVEL_ORDER[level] > LEVEL_ORDER[last.level];
     if (last && !levelRose && now - last.at < cooldownMs) return;
 
-    const username =
-      this.db.prepare<[number], { username: string }>('SELECT username FROM users WHERE id = ?').get(userId)
-        ?.username ?? `id ${userId}`;
+    const username = this.stmt.username.get(userId)?.username ?? `id ${userId}`;
 
-    const res = this.db
-      .prepare(
-        `INSERT INTO incidents (user_id, created_at, level, score, signals) VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(userId, now, level, score, JSON.stringify(signals));
+    const res = this.stmt.insertIncident.run(userId, now, level, score, JSON.stringify(signals));
 
     this.lastAlertAt.set(userId, { at: now, level });
     bus.emit('incident', {

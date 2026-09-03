@@ -46,8 +46,10 @@ export function startTelegram(opts: {
 
   const bot = new Bot(token);
 
+  // без TELEGRAM_ADMIN_CHAT_ID бот никому ничего не рассказывает: /start остаётся доступен,
+  // чтобы узнать свой chat id, но /status и кнопки — только админскому чату
   const isAllowed = (chatId: number | undefined): boolean =>
-    adminChatId === undefined || chatId === adminChatId;
+    adminChatId !== undefined && chatId === adminChatId;
 
   bot.command('start', (ctx) => {
     const suffix = isAllowed(ctx.chat?.id)

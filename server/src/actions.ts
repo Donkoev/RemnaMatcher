@@ -58,11 +58,18 @@ export class Actions {
           this.log(userId, action, source, true);
           return { ok: true, message: `⛔ ${user.username} отключён, соединения сброшены.` };
 
-        case 'enable':
+        case 'enable': {
           await this.enforcer.enableUser({ id: userId, uuid: user.uuid });
           this.db.prepare("UPDATE users SET status = 'ACTIVE' WHERE id = ?").run(userId);
+          // помилование: устройства, попавшие в чёрный список из-за этого юзера, снимаем —
+          // иначе автобан по HWID молча отключит его снова на ближайшем синке
+          const pardoned = this.db.prepare('DELETE FROM hwid_blacklist WHERE source_user_id = ?').run(userId).changes;
           this.log(userId, action, source, true);
-          return { ok: true, message: `✅ ${user.username} снова включён.` };
+          return {
+            ok: true,
+            message: `✅ ${user.username} снова включён.${pardoned > 0 ? ` Из чёрного списка HWID убрано устройств: ${pardoned}.` : ''}`,
+          };
+        }
 
         case 'drop':
           await this.enforcer.dropConnectionsByUser({ id: userId, uuid: user.uuid });

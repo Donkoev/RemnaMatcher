@@ -12,6 +12,8 @@ import type { Actions, ActionName } from '../actions.js';
 import { bus } from '../events.js';
 import { DEFAULT_CONFIG, type ScoringConfig } from '../scoring/rules.js';
 import { Auth, hashPassword, verifyPassword } from './auth.js';
+import { resolvesToPublic } from './net.js';
+import { registerRedRoutes } from './red.js';
 
 const GITHUB_REPO = 'Donkoev/RemnaMatcher';
 const VERSION: string = (
@@ -62,11 +64,15 @@ const ScoringConfigSchema = z.object({
     userSyncIntervalSec: z.number().min(60).max(86_400),
     retentionHours: z.number().min(6).max(720),
   }),
-  thresholds: z.object({
-    yellow: z.number().min(1),
-    orange: z.number().min(1),
-    red: z.number().min(1),
-  }),
+  thresholds: z
+    .object({
+      yellow: z.number().min(1),
+      orange: z.number().min(1),
+      red: z.number().min(1),
+    })
+    .refine((t) => t.yellow < t.orange && t.orange < t.red, {
+      message: 'пороги должны идти по возрастанию: жёлтый < оранжевый < красный',
+    }),
   decayHalfLifeHours: z.number().min(0.5).max(168),
   trafficRateBps: z.number().min(0),
   alertCooldownHours: z.number().min(0).max(168),
@@ -95,8 +101,10 @@ export async function startApi(opts: {
   refineIps: (ips: string[]) => void;
 }): Promise<void> {
   const { db, actions, port, remna, refineIps } = opts;
-  // trustProxy: за reverse-proxy рейт-лимит логина считается по реальному IP из X-Forwarded-For
-  const app = Fastify({ logger: false, trustProxy: true });
+  // trustProxy: за reverse-proxy рейт-лимит логина считается по реальному IP из X-Forwarded-For.
+  // Доверяем только соседям по хосту — localhost и docker-сети (nginx стоит на том же сервере);
+  // иначе любой клиент мог бы подставить чужой IP в заголовок и обойти блокировку перебора
+  const app = Fastify({ logger: false, trustProxy: 'loopback, uniquelocal' });
   await app.register(cors, { origin: true });
   await app.register(cookie);
 
@@ -112,7 +120,8 @@ export async function startApi(opts: {
   // --- Авторизация: весь /api/* закрыт сессией, кроме самих auth-ручек ---
   const auth = new Auth(db);
   const SESSION_COOKIE = 'rm_session';
-  const cookieOpts = { httpOnly: true, sameSite: 'lax' as const, path: '/', maxAge: 7 * 24 * 3600 };
+  // secure: 'auto' — за HTTPS (nginx шлёт X-Forwarded-Proto) кука помечается Secure, на голом localhost — нет
+  const cookieOpts = { httpOnly: true, sameSite: 'lax' as const, secure: 'auto' as const, path: '/', maxAge: 7 * 24 * 3600 };
 
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/')) return;
@@ -217,8 +226,8 @@ export async function startApi(opts: {
       .get(seenTs)!.n;
     return {
       mode: opts.mode,
-      // скрытый раздел «Красная комната» — включается особой строкой RED_ROOM в .env
-      redRoom: Boolean(env.RED_ROOM),
+      // скрытый раздел инфраструктуры — включается особой строкой NODE_PANEL в .env
+      nodePanel: Boolean(env.NODE_PANEL),
       totals: { ...totals, totalUsers, openIncidents, newIncidents },
       levels: Object.fromEntries(levels.map((l) => [l.level, l.n])),
       nodes,
@@ -321,7 +330,7 @@ export async function startApi(opts: {
         `SELECT a.user_id AS userId, u.username, u.status,
                 COUNT(*) AS actionCount, GROUP_CONCAT(DISTINCT a.action) AS actions, MAX(a.ts) AS lastTs
          FROM actions_log a LEFT JOIN users u ON u.id = a.user_id
-         WHERE a.ok = 1 AND a.action IN ('revoke', 'disable', 'drop')
+         WHERE a.ok = 1 AND a.action IN ('revoke', 'disable', 'drop', 'hwid_ban')
          GROUP BY a.user_id
          ORDER BY lastTs DESC
          LIMIT 300`,
@@ -385,7 +394,7 @@ export async function startApi(opts: {
         `SELECT o.ip, MAX(o.last_seen) AS lastSeen, MIN(o.first_seen) AS firstSeen,
                 GROUP_CONCAT(DISTINCT ns.name) AS nodes,
                 m.asn, m.asn_org AS asnOrg, m.country, m.city, m.is_dc AS isDc,
-                MAX(o.last_seen) >= ${windowStart} AS isActive
+                MAX(o.last_seen) >= ? AS isActive
          FROM ip_observations o
          LEFT JOIN ip_meta m ON m.ip = o.ip
          LEFT JOIN node_status ns ON ns.node_uuid = o.node_uuid
@@ -394,7 +403,7 @@ export async function startApi(opts: {
          ORDER BY lastSeen DESC
          LIMIT 300`,
       )
-      .all(userId);
+      .all(windowStart, userId);
 
     const score = db.prepare('SELECT * FROM score_state WHERE user_id = ?').get(userId) as
       | (Record<string, unknown> & { signals: string })
@@ -510,6 +519,9 @@ export async function startApi(opts: {
     return { hwid: q, blacklisted: !!db.prepare('SELECT 1 FROM hwid_blacklist WHERE hwid = ?').get(q), entries };
   });
 
+  // скрытый раздел инфраструктуры — только при NODE_PANEL в .env (см. red.ts)
+  if (env.NODE_PANEL) registerRedRoutes(app, db);
+
   // открытие «Журнала» сбрасывает бейдж новых инцидентов (статусы инцидентов не трогаются)
   app.post('/api/incidents/seen', () => {
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('incidents_seen_ts', String(Date.now()));
@@ -561,17 +573,19 @@ export async function startApi(opts: {
     if (!fs.existsSync(file)) {
       // gstatic — основной источник (www.google.com на некоторых маршрутах виснет), DDG — запасной,
       // Яндекс знает региональные RU-сайты (на неизвестный домен отдаёт 1×1 PNG — режется фильтром <100 байт),
-      // последний шанс — favicon.ico прямо с сайта провайдера
-      const sources = [
-        `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${encodeURIComponent(domain)}&size=64`,
-        `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`,
-        `https://favicon.yandex.net/favicon/${encodeURIComponent(domain)}`,
-        `https://${domain}/favicon.ico`,
+      // последний шанс — favicon.ico прямо с сайта провайдера. Прямой запрос — только к публичному
+      // адресу и без редиректов: иначе ручка превращается в SSRF внутрь сети панели
+      const sources: { url: string; direct: boolean }[] = [
+        { url: `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${encodeURIComponent(domain)}&size=64`, direct: false },
+        { url: `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`, direct: false },
+        { url: `https://favicon.yandex.net/favicon/${encodeURIComponent(domain)}`, direct: false },
+        { url: `https://${domain}/favicon.ico`, direct: true },
       ];
       let saved = false;
-      for (const url of sources) {
+      for (const { url, direct } of sources) {
         try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          if (direct && !(await resolvesToPublic(domain))) continue;
+          const res = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: direct ? 'manual' : 'follow' });
           if (!res.ok) continue;
           const buf = Buffer.from(await res.arrayBuffer());
           if (buf.length < 100) continue;
@@ -642,7 +656,11 @@ export async function startApi(opts: {
 
   app.put('/api/settings', (req, reply) => {
     const parsed = ScoringConfigSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (!parsed.success) {
+      // человекочитаемо: фронт показывает error как текст, а не как объект
+      const error = parsed.error.issues.map((i) => `${i.path.join('.') || 'настройки'}: ${i.message}`).join('; ');
+      return reply.code(400).send({ error });
+    }
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
       'scoring',
       JSON.stringify(parsed.data),
@@ -652,6 +670,8 @@ export async function startApi(opts: {
 
   // SSE: живые обновления для веба
   app.get('/api/events', (req, reply) => {
+    // ответ пишем в сырой сокет сами — говорим Fastify не ждать reply.send
+    reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

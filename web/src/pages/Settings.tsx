@@ -146,15 +146,23 @@ export function Settings() {
     <>
       <PageHeader
         actions={
-          <Button
-            color={saved ? 'teal' : 'cyan'}
-            leftSection={saved ? <TbCheck size={16} /> : undefined}
-            loading={mutation.isPending}
-            onClick={() => mutation.mutate(cfg)}
-            variant="soft"
-          >
-            {saved ? 'Сохранено' : 'Сохранить'}
-          </Button>
+          <Group gap="sm" wrap="nowrap">
+            {/* сервер отвечает текстом (например, пороги не по возрастанию) — показываем его, а не молчим */}
+            {mutation.isError && (
+              <Text c="red.4" fz="sm" maw={420} ta="right">
+                {mutation.error instanceof Error ? mutation.error.message : 'Не сохранилось'}
+              </Text>
+            )}
+            <Button
+              color={saved ? 'teal' : 'cyan'}
+              leftSection={saved ? <TbCheck size={16} /> : undefined}
+              loading={mutation.isPending}
+              onClick={() => mutation.mutate(cfg)}
+              variant="soft"
+            >
+              {saved ? 'Сохранено' : 'Сохранить'}
+            </Button>
+          </Group>
         }
         description="Очки фрода, пороги и окна — применяются со следующего цикла, без перезапуска"
         icon={<TbSettings size={24} />}

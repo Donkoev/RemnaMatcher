@@ -13,8 +13,8 @@ export interface Overview {
   /** последний завершённый круг опроса: когда закончился и сколько занял */
   lastCycle: { at: number; durationMs: number } | null;
   mode: 'mock' | 'live';
-  /** скрытый раздел «Красная комната» включён строкой RED_ROOM в .env */
-  redRoom: boolean;
+  /** скрытый раздел инфраструктуры включён строкой NODE_PANEL в .env */
+  nodePanel: boolean;
   totals: {
     activeIps: number;
     uniqueIps: number;
@@ -262,6 +262,142 @@ export interface UpdateStatus {
   url: string | null;
   pending: boolean;
 }
+
+// Инфраструктура: подключённый узел (сервер).
+// Ноду ставит сама панель по SSH; пароль хранится в панели шифрованным (для переустановки без ввода)
+export interface RedServer {
+  id: number;
+  name: string;
+  address: string;
+  /** SSH-порт */
+  port: number;
+  sshUser: string;
+  /** TCP-доступность сервера */
+  status: 'never' | 'online' | 'offline';
+  agentStatus: 'none' | 'installing' | 'connected' | 'error';
+  /** агент ставился на ноду — доступно обновление без SSH */
+  agentReady: boolean;
+  /** панель ходит к агенту по TLS с закреплённым сертификатом; false — старый агент по HTTP, нужна переустановка */
+  tls: boolean;
+  /** SSH-пароль сохранён — переустановка без повторного ввода */
+  hasPass: boolean;
+  lastError: string | null;
+  os: string | null;
+  kernel: string | null;
+  cpu: string | null;
+  cores: number | null;
+  memMb: number | null;
+  diskFree: string | null;
+  latencyMs: number | null;
+  lastCheckAt: number | null;
+  lastOkAt: number | null;
+  createdAt: number;
+}
+
+export interface RedInstallJob {
+  lines: string[];
+  done: boolean;
+  ok: boolean;
+}
+
+// Инфраструктура → конфигурации: сервер из импортированной подписки (раскладка как в Happ)
+export interface RedSubServer {
+  /** протокол: VLESS/VMESS/TROJAN/SS; у пула — общий протокол или MIXED */
+  protocol: string;
+  name: string;
+  /** эмодзи-флаг из имени сервера */
+  flag: string | null;
+  address: string;
+  port: number | null;
+  transport: string | null;
+  security: string | null;
+  /** запись пришла из JSON-конфига xray, а не из ссылки */
+  fromJson?: boolean;
+  /** балансировщик: раскрываемый пул серверов */
+  pool?: RedSubServer[];
+}
+
+// живой статус непрерывного спидтеста на ноде (скорости в Мбит/с)
+export interface RedSpeedStatus {
+  running: boolean;
+  pingMs?: number | null;
+  elapsedS?: number;
+  downBytes?: number;
+  upBytes?: number;
+  /** текущая скорость — окно между опросами статуса */
+  downCurrentMbps?: number | null;
+  upCurrentMbps?: number | null;
+  downPeakMbps?: number | null;
+  upPeakMbps?: number | null;
+  downAvgMbps?: number | null;
+  upAvgMbps?: number | null;
+  /** последняя ошибка направления — почему поток не даёт данных (напр. HTTP 429) */
+  downError?: string | null;
+  upError?: string | null;
+  error?: string;
+}
+
+export interface RedSubscription {
+  id: number;
+  name: string;
+  url: string;
+  servers: RedSubServer[];
+  serverCount: number;
+  lastError: string | null;
+  /** байт потрачено — из заголовка subscription-userinfo (как рисует Happ) */
+  trafficUsed: number | null;
+  /** лимит в байтах; 0 = безлимит */
+  trafficTotal: number | null;
+  /** срок подписки, мс */
+  expireAt: number | null;
+  updatedAt: number | null;
+  createdAt: number;
+}
+
+export const redApi = {
+  servers: () => json<RedServer[]>('/api/red/servers'),
+  addServer: (body: { name: string; address: string; port: number; username: string; password: string }) =>
+    post<{ ok: boolean; id: number }>('/api/red/servers', body),
+  // password не нужен, если у сервера сохранён (hasPass)
+  reinstall: (id: number, password?: string) =>
+    post<{ ok: boolean; id: number }>(`/api/red/servers/${id}/install`, password ? { password } : {}),
+  installLog: (id: number) => json<RedInstallJob>(`/api/red/servers/${id}/install-log`),
+  // обновить агента без пароля (по HTTP работающему агенту)
+  updateAgent: (id: number) => post<{ ok: boolean }>(`/api/red/servers/${id}/update-agent`, {}),
+  deleteServer: (id: number) => json<{ ok: boolean }>(`/api/red/servers/${id}`, { method: 'DELETE' }),
+
+  // настройки раздела: HWID, которым панель представляется при импорте подписок;
+  // пустая строка — панель выводит стабильный HWID сама
+  settings: () => json<{ hwid: string }>('/api/red/settings'),
+  saveSettings: (hwid: string) =>
+    json<{ ok: boolean; hwid: string }>('/api/red/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hwid }),
+    }),
+
+  // конфигурации: импортированные подписки — добавление сразу качает и разбирает список;
+  // name необязателен — пустой заполнится из profile-title подписки или хоста URL
+  addSubscription: (body: { name?: string; url: string }) => post<RedSubscription>('/api/red/subscriptions', body),
+  subscriptions: () => json<RedSubscription[]>('/api/red/subscriptions'),
+  refreshSubscription: (id: number) => post<RedSubscription>(`/api/red/subscriptions/${id}/refresh`, {}),
+  deleteSubscription: (id: number) => json<{ ok: boolean }>(`/api/red/subscriptions/${id}`, { method: 'DELETE' }),
+  // пинг всех серверов подписки; ключ результата — «address:port».
+  // via 'url' — URL-тест ЧЕРЕЗ прокси (GET generate_204, как burstObservatory xray),
+  // via 'tcp' — фолбэк голым TCP-коннектом до адреса
+  pingSubscription: (id: number) =>
+    post<{ results: Record<string, { ok: boolean; latencyMs: number | null; via: 'url' | 'tcp' }> }>(
+      `/api/red/subscriptions/${id}/ping`,
+      {},
+    ),
+  // непрерывный спидтест сервера подписки (key — «address:port») силами ноды serverId:
+  // start запускает на ноде постоянную загрузку+отдачу через outbound сервера,
+  // status поллится и отдаёт живые скорости, stop глушит и возвращает итог
+  speedtestStart: (id: number, key: string, serverId: number) =>
+    post<{ ok: boolean; pingMs: number | null }>(`/api/red/subscriptions/${id}/speedtest/start`, { key, serverId }),
+  speedtestStatus: (serverId: number) => json<RedSpeedStatus>(`/api/red/speedtest/status/${serverId}`),
+  speedtestStop: (serverId: number) => post<RedSpeedStatus>('/api/red/speedtest/stop', { serverId }),
+};
 
 export const hwidApi = {
   blacklist: () => json<HwidBlacklistEntry[]>('/api/hwid/blacklist'),

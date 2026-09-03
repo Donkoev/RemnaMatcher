@@ -35,6 +35,10 @@ interface HttpOpts {
   secret?: string;
 }
 
+// зависшая панель не должна подвешивать цикл коллектора навсегда: страница из 500 юзеров
+// и результат job'а укладываются в секунды, 30 с — с большим запасом
+const API_TIMEOUT_MS = 30_000;
+
 async function api<T>(opts: HttpOpts, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   let url = `${opts.baseUrl.replace(/\/+$/, '')}${path}`;
   const headers: Record<string, string> = {
@@ -49,6 +53,7 @@ async function api<T>(opts: HttpOpts, method: 'GET' | 'POST', path: string, body
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

@@ -4,11 +4,9 @@ build/
 *.log
 .env
 .env.local
-server/data/*.db
-server/data/*.db-journal
-server/data/*.db-wal
-server/data/*.db-shm
-server/data/*.mmdb
-server/data/icons/
+# всё содержимое data — рантайм: базы, гео-базы, бинарники xray, ключи, кэш иконок, бэкапы
+server/data/
+__pycache__/
+*.pyc
 .claude/
 .DS_Store

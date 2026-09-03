@@ -15,6 +15,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class Collector {
   private stopped = false;
   private lastUserSync = 0;
+  private lastMetaPrune = 0;
 
   constructor(
     private db: Database.Database,
@@ -114,7 +115,13 @@ export class Collector {
       }
     };
 
-    const queue = [...nodes];
+    // нода, отвалившаяся от панели, job не выполнит — не ждём её больше минуты каждый цикл,
+    // а сразу помечаем причину; вернётся на связь — опросим в следующем круге
+    const queue: typeof nodes = [];
+    for (const node of nodes) {
+      if (node.isConnected) queue.push(node);
+      else upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, 'нода не подключена к панели', 0, 0);
+    }
     const workers = Array.from({ length: Math.max(1, cc.nodeConcurrency) }, async (_, wi) => {
       await sleep(wi * cc.nodePollGapMs);
       while (!this.stopped) {
@@ -169,6 +176,7 @@ export class Collector {
     const insertSnapshot = this.db.prepare(
       'INSERT OR IGNORE INTO traffic_snapshots (user_id, ts, used) VALUES (?, ?, ?)',
     );
+    let pruned = 0;
     const tx = this.db.transaction(() => {
       for (const u of users) {
         upsertUser.run(
@@ -191,9 +199,20 @@ export class Collector {
         );
         insertSnapshot.run(u.id, now, u.usedTrafficBytes);
       }
+      // юзеры, которых панель больше не отдаёт, удалены из неё — сносим их вместе с текущим
+      // состоянием, иначе призраки копятся вечно. История (инциденты, журнал, hwid) остаётся.
+      // Пустой ответ панели считаем сбоем, а не «всех удалили»
+      if (users.length > 0) {
+        pruned = this.db.prepare('DELETE FROM users WHERE synced_at < ?').run(now).changes;
+        if (pruned > 0) {
+          for (const table of ['score_state', 'ip_observations', 'traffic_snapshots', 'whitelist']) {
+            this.db.prepare(`DELETE FROM ${table} WHERE user_id NOT IN (SELECT id FROM users)`).run();
+          }
+        }
+      }
     });
     tx();
-    console.log(`[collector] user sync: ${users.length} users`);
+    console.log(`[collector] user sync: ${users.length} users${pruned > 0 ? `, удалено из панели: ${pruned}` : ''}`);
   }
 
   /**
@@ -286,5 +305,16 @@ export class Collector {
     this.db.prepare('DELETE FROM torrent_reports WHERE created_at < ?').run(cutoff);
     const incidentCutoff = Date.now() - 30 * 864e5;
     this.db.prepare('DELETE FROM incidents WHERE created_at < ?').run(incidentCutoff);
+
+    // кэш гео по IP: строка на каждый адрес за всё время иначе растёт бесконечно.
+    // Чистим раз в час адреса, которых давно нет в наблюдениях (активные не трогаем —
+    // у них кэш и уточнённые города остаются)
+    if (Date.now() - this.lastMetaPrune > 3600_000) {
+      this.lastMetaPrune = Date.now();
+      const metaCutoff = Date.now() - 30 * 864e5;
+      this.db
+        .prepare('DELETE FROM ip_meta WHERE resolved_at < ? AND ip NOT IN (SELECT ip FROM ip_observations)')
+        .run(metaCutoff);
+    }
   }
 }
