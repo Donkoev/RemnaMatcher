@@ -47,7 +47,9 @@ export function createIpinfoRefiner(db: Database.Database): { refineIps: (ips: s
             continue;
           }
           if (!res.ok) {
-            markRefined.run(ip);
+            // 4xx — по этому IP ipinfo ничего не даст, больше не спрашиваем;
+            // 5xx и прочее — временный сбой: IP остаётся неуточнённым и вернётся в очередь позже
+            if (res.status >= 400 && res.status < 500) markRefined.run(ip);
             continue;
           }
           const j = (await res.json()) as { city?: string; country?: string };

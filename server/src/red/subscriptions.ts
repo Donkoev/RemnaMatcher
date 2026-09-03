@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { fetchPublic } from '../api/net.js';
 import { secretKey } from './servers.js';
 
 // Инфраструктура → конфигурации: импорт подписок, как в Happ.
@@ -300,12 +301,16 @@ function decodeProfileTitle(h: string | null): string | null {
   return v || null;
 }
 
-/** Скачать тело подписки. Представляемся Happ — панели отдают этому UA клиентский формат. */
+/**
+ * Скачать тело подписки. Представляемся Happ — панели отдают этому UA клиентский формат.
+ * URL задаёт пользователь, поэтому ходим только к публичным адресам (редиректы — тоже):
+ * иначе импорт превращается в SSRF внутрь сети панели.
+ */
 export async function fetchSubscription(
   url: string,
   hwid: string,
 ): Promise<{ body: string; profileTitle: string | null; userinfo: SubUserinfo }> {
-  const res = await fetch(url, {
+  const res = await fetchPublic(url, {
     headers: {
       'User-Agent': 'Happ/1.6.5',
       Accept: '*/*',

@@ -45,6 +45,12 @@ function decryptSecret(blob: string): string | null {
 
 const AGENT_PORT = 8760;
 const AGENT_DIR = '/opt/remnamatcher-agent';
+
+/** агент старой установки без сертификата: по открытому HTTP панель к нему не ходит */
+export const NO_TLS_ERROR =
+  'агент старой установки без TLS — панель к нему не ходит; переустанови его из меню сервера';
+/** префикс ошибки о смене ключа хоста SSH — фронт по нему предлагает подтвердить новый ключ */
+export const HOST_KEY_CHANGED = 'Ключ хоста SSH изменился';
 // содержимое агента читаем из репозитория один раз
 const AGENT_PY = fs.readFileSync(new URL('../../agent/agent.py', import.meta.url), 'utf8');
 
@@ -85,9 +91,11 @@ export interface RedServerRow {
   mem_mb: number | null;
   disk_free: string | null;
   agent_port: number | null;
-  /** SHA-256 отпечаток TLS-сертификата агента (пин); null — старый агент по HTTP */
+  /** SHA-256 отпечаток TLS-сертификата агента (пин); null — старый агент без TLS, только переустановка */
   agent_fp: string | null;
   ssh_pass: string | null;
+  /** SHA-256 отпечаток ключа хоста SSH (TOFU: запомнен при первом подключении); null — ещё не подключались */
+  ssh_host_fp: string | null;
   latency_ms: number | null;
   last_check_at: number | null;
   last_ok_at: number | null;
@@ -100,6 +108,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export interface SshCreds {
   username: string;
   password?: string;
+  /** сервер переустанавливали — принять новый ключ хоста вместо запомненного (явное решение человека) */
+  acceptNewHostKey?: boolean;
 }
 
 /** есть ли у сервера сохранённый пароль (тогда переустановка — без ввода) */
@@ -166,6 +176,15 @@ export async function checkRedServer(db: Database.Database, id: number): Promise
 
   // во время установки агента не трогаем — итог выставит сам пайплайн установки
   if (row.agent_port != null && row.agent_status !== 'installing') {
+    if (row.agent_fp == null) {
+      // агент старой установки без сертификата: по открытому HTTP не ходим — токен даёт
+      // /self-update (выполнение кода на ноде), в открытом виде его показывать нельзя никому
+      db.prepare("UPDATE red_servers SET agent_status = 'error', latency_ms = NULL, last_error = ? WHERE id = ?").run(
+        NO_TLS_ERROR,
+        id,
+      );
+      return db.prepare<[number], RedServerRow>('SELECT * FROM red_servers WHERE id = ?').get(id) ?? null;
+    }
     const t0 = Date.now();
     const health = await agentHealth({ host: row.address, port: row.agent_port, token: row.token, fp: row.agent_fp });
     if (health?.ok) {
@@ -277,6 +296,7 @@ export async function updateAgent(db: Database.Database, id: number): Promise<{ 
   const row = db.prepare<[number], RedServerRow>('SELECT * FROM red_servers WHERE id = ?').get(id);
   if (!row) return { ok: false, error: 'Сервер не найден' };
   if (!row.agent_port) return { ok: false, error: 'Агент ещё не установлен — нужна полная установка по SSH' };
+  if (!row.agent_fp) return { ok: false, error: 'Агент старой установки без TLS — по сети не обновить, нужна переустановка по SSH' };
 
   const addr: AgentAddr = { host: row.address, port: row.agent_port, token: row.token, fp: row.agent_fp };
   const push = await agentSelfUpdate(addr, AGENT_PY);
@@ -329,11 +349,36 @@ export function installRedServer(db: Database.Database, id: number, creds: SshCr
 
     db.prepare("UPDATE red_servers SET agent_status = 'installing', last_error = NULL WHERE id = ?").run(id);
 
+    // Ключ хоста SSH: при первом подключении запоминаем (TOFU), дальше сверяем ДО отправки
+    // пароля — подменённому серверу пароль не достанется. Ключ меняется при переустановке ОС;
+    // тогда человек явно подтверждает новый галочкой в форме переустановки
+    const expectedHostFp = creds.acceptNewHostKey ? null : row.ssh_host_fp;
+    const seen = { hostFp: null as string | null };
+    const hostVerifier = (fp: string): boolean => {
+      seen.hostFp = fp;
+      return expectedHostFp == null || fp === expectedHostFp;
+    };
+
     let conn: Client | null = null;
     try {
       log(`Подключаюсь по SSH к ${row.address}:${row.port}…`);
-      conn = await sshConnectRetry({ host: row.address, port: row.port, username: creds.username, password });
+      conn = await sshConnectRetry({
+        host: row.address,
+        port: row.port,
+        username: creds.username,
+        password,
+        hostHash: 'sha256',
+        hostVerifier,
+      });
       log('✓ SSH-доступ есть');
+      if (seen.hostFp && seen.hostFp !== row.ssh_host_fp) {
+        db.prepare('UPDATE red_servers SET ssh_host_fp = ? WHERE id = ?').run(seen.hostFp, id);
+        log(
+          row.ssh_host_fp
+            ? `⚠ Принят новый ключ хоста по твоему подтверждению (…${seen.hostFp.slice(-12)})`
+            : `✓ Ключ хоста SSH запомнен (…${seen.hostFp.slice(-12)}) — дальше сверяется при каждом подключении`,
+        );
+      }
       // запоминаем пароль (шифрованным) — чтобы дальше переустанавливать без ввода
       db.prepare('UPDATE red_servers SET ssh_pass = ? WHERE id = ?').run(encryptSecret(password), id);
 
@@ -498,7 +543,15 @@ export function installRedServer(db: Database.Database, id: number, creds: SshCr
       job.done = true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      fail(/authentication/i.test(msg) ? 'SSH не пустил: неверный логин или пароль' : `SSH: ${msg}`);
+      if (/host denied/i.test(msg)) {
+        fail(
+          `${HOST_KEY_CHANGED}: был …${(row.ssh_host_fp ?? '').slice(-12)}, стал …${(seen.hostFp ?? '').slice(-12)}. ` +
+            'Пароль серверу НЕ отправлен. Если сервер переустанавливали — запусти переустановку с галочкой ' +
+            '«принять новый ключ хоста»; иначе кто-то подменяет сервер',
+        );
+      } else {
+        fail(/authentication/i.test(msg) ? 'SSH не пустил: неверный логин или пароль' : `SSH: ${msg}`);
+      }
     } finally {
       conn?.end();
     }

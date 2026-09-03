@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import {
+  HOST_KEY_CHANGED,
   checkTcp,
   getInstallJob,
   installRedServer,
@@ -39,6 +40,8 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     // сертификат закреплён — панель ходит к агенту по TLS; иначе старый агент по HTTP до переустановки
     tls: r.agent_fp != null,
     hasPass: r.ssh_pass != null, // пароль сохранён (шифрованно) — переустановка без ввода
+    // ключ хоста SSH не совпал с запомненным — переустановка требует явно принять новый
+    hostKeyChanged: r.last_error?.startsWith(HOST_KEY_CHANGED) ?? false,
     lastError: r.last_error,
     os: r.os,
     kernel: r.kernel,
@@ -52,12 +55,13 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     createdAt: r.created_at,
   });
 
-  const agentAddr = (r: RedServerRow, port: number): AgentAddr => ({
-    host: r.address,
-    port,
-    token: r.token,
-    fp: r.agent_fp,
-  });
+  // агент готов к командам: порт есть и сертификат приколот. Старый агент без TLS — только переустановка
+  const agentOf = (r: RedServerRow): AgentAddr | null =>
+    r.agent_port == null || r.agent_fp == null
+      ? null
+      : { host: r.address, port: r.agent_port, token: r.token, fp: r.agent_fp };
+  const noAgentError = (r: RedServerRow): string =>
+    r.agent_port == null ? 'На ноде не установлен агент' : 'Агент без TLS — переустанови его в «Серверах»';
 
   app.get('/api/red/servers', () => {
     const rows = db.prepare<[], RedServerRow>('SELECT * FROM red_servers ORDER BY created_at').all();
@@ -103,6 +107,7 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
       .object({
         username: z.string().trim().min(1).max(64).optional(),
         password: z.string().min(1).max(200).optional(),
+        acceptNewHostKey: z.boolean().optional(),
       })
       .safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'Проверь логин/пароль' });
@@ -111,7 +116,11 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     }
     const username = parsed.data.username || srv.ssh_user;
     db.prepare('UPDATE red_servers SET ssh_user = ? WHERE id = ?').run(username, id);
-    installRedServer(db, id, { username, password: parsed.data.password });
+    installRedServer(db, id, {
+      username,
+      password: parsed.data.password,
+      acceptNewHostKey: parsed.data.acceptNewHostKey,
+    });
     return { ok: true, id };
   });
 
@@ -315,7 +324,8 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     if (!row) return reply.code(404).send({ error: 'Подписка не найдена' });
     const node = nodeById(parsed.data.serverId);
     if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
-    if (node.agent_port == null) return reply.code(400).send({ error: 'На ноде не установлен агент' });
+    const agent = agentOf(node);
+    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
     let servers: SubServer[] = [];
     try {
       servers = JSON.parse(row.servers) as SubServer[];
@@ -331,7 +341,7 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     if (!target) return reply.code(404).send({ error: 'Сервер не найден в подписке' });
     const outbound = serverOutbound(target);
     if (!outbound) return reply.code(400).send({ error: 'Для сервера нет данных подключения — обнови подписку' });
-    const r = await agentSpeedStart(agentAddr(node, node.agent_port), outbound);
+    const r = await agentSpeedStart(agent, outbound);
     if (!r.ok) return reply.code(502).send({ error: r.error ?? 'Не удалось запустить замер' });
     return { ok: true, pingMs: r.pingMs ?? null };
   });
@@ -339,8 +349,9 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
   app.get('/api/red/speedtest/status/:serverId', async (req, reply) => {
     const node = nodeById(Number((req.params as { serverId: string }).serverId));
     if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
-    if (node.agent_port == null) return reply.code(400).send({ error: 'На ноде не установлен агент' });
-    const st = await agentSpeedStatus(agentAddr(node, node.agent_port));
+    const agent = agentOf(node);
+    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
+    const st = await agentSpeedStatus(agent);
     if (!st) return reply.code(502).send({ error: 'нет связи с агентом' });
     return st;
   });
@@ -350,9 +361,10 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     if (!parsed.success) return reply.code(400).send({ error: 'Нужен id ноды' });
     const node = nodeById(parsed.data.serverId);
     if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
-    if (node.agent_port == null) return reply.code(400).send({ error: 'На ноде не установлен агент' });
+    const agent = agentOf(node);
+    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
     // агент не ответил — не страшно: без опросов статуса он заглушит замер сам
-    const st = await agentSpeedStop(agentAddr(node, node.agent_port));
+    const st = await agentSpeedStop(agent);
     return st ?? { running: false };
   });
 

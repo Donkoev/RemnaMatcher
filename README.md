@@ -62,7 +62,7 @@ npm test             # юнит-тесты сервера (vitest)
 npm run build        # server → dist, web → dist
 ```
 
-`MODE=mock` в `server/.env` запускает систему на сгенерированных данных, без подключения к панели. GeoIP-базы для live-режима: `npm run -w server geoip`.
+`MODE=mock` в `server/.env` запускает систему на сгенерированных данных, без подключения к панели. GeoIP-базы (DB-IP Lite) в live-режиме сервер скачивает сам при первом старте и обновляет раз в месяц; вручную — `npm run -w server geoip`.
 
 CI (`.github/workflows/ci.yml`) гоняет typecheck, lint, тесты и сборку на каждый push; образ в ghcr собирается по тегу `vX.Y.Z`. В продакшен-образе только скомпилированный JS и production-зависимости.
 

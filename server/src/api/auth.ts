@@ -127,16 +127,19 @@ export class Auth {
     return Math.max(0, f.lockedUntil - Date.now());
   }
 
-  registerFail(ip: string): void {
+  /** запомнить неудачу; возвращает номер попытки и длительность блокировки (0 — ещё не заблокирован) */
+  registerFail(ip: string): { count: number; lockedMs: number } {
     const f = this.fails.get(ip) ?? { count: 0, lockedUntil: 0, lastAt: 0 };
     f.count += 1;
     f.lastAt = Date.now();
     // с 5-й неудачи — блокировка 30с, каждая следующая удваивает (потолок 1 час)
+    let lockedMs = 0;
     if (f.count >= 5) {
-      const lockMs = Math.min(30_000 * 2 ** (f.count - 5), 3600_000);
-      f.lockedUntil = Date.now() + lockMs;
+      lockedMs = Math.min(30_000 * 2 ** (f.count - 5), 3600_000);
+      f.lockedUntil = Date.now() + lockedMs;
     }
     this.fails.set(ip, f);
+    return { count: f.count, lockedMs };
   }
 
   clearFails(ip: string): void {

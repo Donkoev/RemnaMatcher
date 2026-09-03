@@ -281,6 +281,8 @@ export interface RedServer {
   tls: boolean;
   /** SSH-пароль сохранён — переустановка без повторного ввода */
   hasPass: boolean;
+  /** ключ хоста SSH не совпал с запомненным — переустановка требует явно принять новый */
+  hostKeyChanged: boolean;
   lastError: string | null;
   os: string | null;
   kernel: string | null;
@@ -358,9 +360,13 @@ export const redApi = {
   servers: () => json<RedServer[]>('/api/red/servers'),
   addServer: (body: { name: string; address: string; port: number; username: string; password: string }) =>
     post<{ ok: boolean; id: number }>('/api/red/servers', body),
-  // password не нужен, если у сервера сохранён (hasPass)
-  reinstall: (id: number, password?: string) =>
-    post<{ ok: boolean; id: number }>(`/api/red/servers/${id}/install`, password ? { password } : {}),
+  // password не нужен, если у сервера сохранён (hasPass); acceptNewHostKey — сервер переустанавливали,
+  // принять его новый ключ хоста вместо запомненного
+  reinstall: (id: number, password?: string, acceptNewHostKey?: boolean) =>
+    post<{ ok: boolean; id: number }>(`/api/red/servers/${id}/install`, {
+      ...(password ? { password } : {}),
+      ...(acceptNewHostKey ? { acceptNewHostKey: true } : {}),
+    }),
   installLog: (id: number) => json<RedInstallJob>(`/api/red/servers/${id}/install-log`),
   // обновить агента без пароля (по HTTP работающему агенту)
   updateAgent: (id: number) => post<{ ok: boolean }>(`/api/red/servers/${id}/update-agent`, {}),

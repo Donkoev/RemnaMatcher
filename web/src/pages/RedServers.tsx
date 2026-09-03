@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Center,
+  Checkbox,
   Code,
   Group,
   Menu,
@@ -262,6 +263,7 @@ export function RedServers() {
   const [installId, setInstallId] = useState<number | null>(null);
   const [reinstall, setReinstall] = useState<RedServer | null>(null);
   const [reinstallPw, setReinstallPw] = useState('');
+  const [acceptHostKey, setAcceptHostKey] = useState(false);
   const [delTarget, setDelTarget] = useState<RedServer | null>(null);
   const [err, setErr] = useState('');
 
@@ -277,10 +279,12 @@ export function RedServers() {
   });
 
   const reinstallM = useMutation({
-    mutationFn: (v: { id: number; password?: string }) => redApi.reinstall(v.id, v.password),
+    mutationFn: (v: { id: number; password?: string; acceptNewHostKey?: boolean }) =>
+      redApi.reinstall(v.id, v.password, v.acceptNewHostKey),
     onSuccess: (r) => {
       setReinstall(null);
       setReinstallPw('');
+      setAcceptHostKey(false);
       setInstallId(r.id);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : 'Ошибка'),
@@ -436,6 +440,7 @@ export function RedServers() {
         onClose={() => {
           setReinstall(null);
           setReinstallPw('');
+          setAcceptHostKey(false);
           setErr('');
         }}
         opened={reinstall != null}
@@ -453,6 +458,15 @@ export function RedServers() {
               value={reinstallPw}
             />
           )}
+          {reinstall?.hostKeyChanged && (
+            <Checkbox
+              checked={acceptHostKey}
+              color="red"
+              description="Ключ хоста SSH не совпал с запомненным. Ставь галочку, только если сервер переустанавливали — иначе пароль уйдёт тому, кто подменил сервер"
+              label="Сервер переустанавливали — принять новый ключ хоста"
+              onChange={(e) => setAcceptHostKey(e.currentTarget.checked)}
+            />
+          )}
           {err && (
             <Text c="red.4" fz="sm">
               {err}
@@ -464,12 +478,16 @@ export function RedServers() {
             </Button>
             <Button
               color="red"
-              disabled={!reinstallPw && !reinstall?.hasPass}
+              disabled={(!reinstallPw && !reinstall?.hasPass) || (Boolean(reinstall?.hostKeyChanged) && !acceptHostKey)}
               loading={reinstallM.isPending}
               variant="soft"
               onClick={() => {
                 setErr('');
-                reinstallM.mutate({ id: reinstall!.id, password: reinstallPw || undefined });
+                reinstallM.mutate({
+                  id: reinstall!.id,
+                  password: reinstallPw || undefined,
+                  acceptNewHostKey: acceptHostKey || undefined,
+                });
               }}
             >
               Переустановить

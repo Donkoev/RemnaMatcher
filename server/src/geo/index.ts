@@ -45,13 +45,17 @@ export class MmdbGeoProvider implements GeoProvider {
   private city: Reader<CityResponse> | null = null;
   private asn: Reader<AsnResponse> | null = null;
 
-  constructor(cityPath: string, asnPath: string) {
-    if (fs.existsSync(cityPath)) {
-      this.city = new Reader<CityResponse>(fs.readFileSync(cityPath));
-    }
-    if (fs.existsSync(asnPath)) {
-      this.asn = new Reader<AsnResponse>(fs.readFileSync(asnPath));
-    }
+  constructor(
+    private cityPath: string,
+    private asnPath: string,
+  ) {
+    this.reload();
+  }
+
+  /** перечитать базы с диска — после ежемесячного обновления файлов */
+  reload(): void {
+    this.city = fs.existsSync(this.cityPath) ? new Reader<CityResponse>(fs.readFileSync(this.cityPath)) : null;
+    this.asn = fs.existsSync(this.asnPath) ? new Reader<AsnResponse>(fs.readFileSync(this.asnPath)) : null;
   }
 
   get ready(): { city: boolean; asn: boolean } {

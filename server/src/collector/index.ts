@@ -4,6 +4,7 @@ import type { ScoringEngine } from '../scoring/engine.js';
 import type { ScoringConfig } from '../scoring/rules.js';
 import type { Actions } from '../actions.js';
 import { bus } from '../events.js';
+import { SNAPSHOT_TIERS, ticksToDrop } from './thin.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -315,6 +316,28 @@ export class Collector {
       this.db
         .prepare('DELETE FROM ip_meta WHERE resolved_at < ? AND ip NOT IN (SELECT ip FROM ip_observations)')
         .run(metaCutoff);
+      this.thinSnapshots();
     }
+  }
+
+  /**
+   * Снапшоты трафика: строка на каждого юзера каждый синк — на десятках тысяч юзеров это
+   * миллионы строк в сутки. Последний час держим как есть (движок считает скорость по нему),
+   * старше часа — тик на 10 минут (график в отчёте рисует сутки по 15 минут), старше суток —
+   * тик в час. Тик общий для всех юзеров, поэтому чистим целыми тиками по индексу ts.
+   */
+  private thinSnapshots(): void {
+    const now = Date.now();
+    const ticks = this.db
+      .prepare<[number], { ts: number }>('SELECT DISTINCT ts FROM traffic_snapshots WHERE ts < ? ORDER BY ts')
+      .all(now - SNAPSHOT_TIERS[0]!.olderThanMs)
+      .map((r) => r.ts);
+    const drop = ticksToDrop(ticks, now);
+    if (drop.length === 0) return;
+    const del = this.db.prepare('DELETE FROM traffic_snapshots WHERE ts = ?');
+    const tx = this.db.transaction(() => {
+      for (const ts of drop) del.run(ts);
+    });
+    tx();
   }
 }

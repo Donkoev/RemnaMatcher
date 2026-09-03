@@ -207,6 +207,27 @@ export class ScoringEngine {
     tx();
   }
 
+  /**
+   * Пересчитать кэш гео по всем IP после обновления mmdb-баз: ASN, датацентр и координаты
+   * берём заново, а город и страну записей, уточнённых через ipinfo (refined=1), не трогаем —
+   * они точнее оффлайн-базы. Возвращает число пересчитанных адресов.
+   */
+  rebuildIpMeta(now = Date.now()): number {
+    const rows = this.db.prepare<[], { ip: string; refined: number }>('SELECT ip, refined FROM ip_meta').all();
+    const updateKeepCity = this.db.prepare(
+      'UPDATE ip_meta SET asn = ?, asn_org = ?, lat = ?, lon = ?, is_dc = ?, resolved_at = ? WHERE ip = ?',
+    );
+    const tx = this.db.transaction(() => {
+      for (const r of rows) {
+        const m = this.geo.lookup(r.ip);
+        if (r.refined === 1) updateKeepCity.run(m.asn, m.asnOrg, m.lat, m.lon, m.isDatacenter ? 1 : 0, now, r.ip);
+        else this.stmt.metaPut.run(r.ip, m.asn, m.asnOrg, m.country, m.city, m.lat, m.lon, m.isDatacenter ? 1 : 0, now);
+      }
+    });
+    tx();
+    return rows.length;
+  }
+
   private resolveMeta(ip: string, now: number): IpMeta {
     const cached = this.stmt.metaGet.get(ip);
     if (cached) {

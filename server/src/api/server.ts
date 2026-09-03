@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
@@ -12,7 +11,7 @@ import type { Actions, ActionName } from '../actions.js';
 import { bus } from '../events.js';
 import { DEFAULT_CONFIG, type ScoringConfig } from '../scoring/rules.js';
 import { Auth, hashPassword, verifyPassword } from './auth.js';
-import { resolvesToPublic } from './net.js';
+import { fetchPublic } from './net.js';
 import { registerRedRoutes } from './red.js';
 
 const GITHUB_REPO = 'Donkoev/RemnaMatcher';
@@ -105,7 +104,6 @@ export async function startApi(opts: {
   // Доверяем только соседям по хосту — localhost и docker-сети (nginx стоит на том же сервере);
   // иначе любой клиент мог бы подставить чужой IP в заголовок и обойти блокировку перебора
   const app = Fastify({ logger: false, trustProxy: 'loopback, uniquelocal' });
-  await app.register(cors, { origin: true });
   await app.register(cookie);
 
   const webDist = path.resolve('../web/dist');
@@ -158,10 +156,16 @@ export async function startApi(opts: {
     // лёгкое замедление против онлайн-перебора
     await new Promise((r) => setTimeout(r, 250));
     if (!(await verifyPassword(parsed.data.password, hash))) {
-      auth.registerFail(req.ip);
+      const fail = auth.registerFail(req.ip);
+      // неудачные входы — в лог: по docker logs видно, что панель кто-то перебирает
+      console.warn(
+        `[auth] неверный пароль с ${req.ip} (неудача №${fail.count})` +
+          (fail.lockedMs > 0 ? `, блокировка на ${Math.round(fail.lockedMs / 1000)} с` : ''),
+      );
       return reply.code(401).send({ error: 'неверный пароль' });
     }
     auth.clearFails(req.ip);
+    console.log(`[auth] вход с ${req.ip}`);
     const token = auth.createSession(req.ip, req.headers['user-agent']);
     return reply.setCookie(SESSION_COOKIE, token, cookieOpts).send({ ok: true });
   });
@@ -573,8 +577,9 @@ export async function startApi(opts: {
     if (!fs.existsSync(file)) {
       // gstatic — основной источник (www.google.com на некоторых маршрутах виснет), DDG — запасной,
       // Яндекс знает региональные RU-сайты (на неизвестный домен отдаёт 1×1 PNG — режется фильтром <100 байт),
-      // последний шанс — favicon.ico прямо с сайта провайдера. Прямой запрос — только к публичному
-      // адресу и без редиректов: иначе ручка превращается в SSRF внутрь сети панели
+      // последний шанс — favicon.ico прямо с сайта провайдера. Все запросы идут через диспетчер,
+      // который соединяется только с публичными адресами (net.ts) — иначе ручка превращается
+      // в SSRF внутрь сети панели; прямой запрос к сайту провайдера ещё и без редиректов
       const sources: { url: string; direct: boolean }[] = [
         { url: `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${encodeURIComponent(domain)}&size=64`, direct: false },
         { url: `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`, direct: false },
@@ -584,8 +589,7 @@ export async function startApi(opts: {
       let saved = false;
       for (const { url, direct } of sources) {
         try {
-          if (direct && !(await resolvesToPublic(domain))) continue;
-          const res = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: direct ? 'manual' : 'follow' });
+          const res = await fetchPublic(url, { signal: AbortSignal.timeout(5000), redirect: direct ? 'manual' : 'follow' });
           if (!res.ok) continue;
           const buf = Buffer.from(await res.arrayBuffer());
           if (buf.length < 100) continue;
@@ -676,7 +680,6 @@ export async function startApi(opts: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
     });
     const send = (type: string, data: unknown) => {
       reply.raw.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);

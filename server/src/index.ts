@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import { env, assertLiveConfig } from './config.js';
 import { openDb } from './db/index.js';
 import { MockGeoProvider, MmdbGeoProvider, type GeoProvider } from './geo/index.js';
+import { GEOIP_MAX_AGE_DAYS, downloadGeoip, geoipStale } from './geo/download.js';
 import { HttpRemnaEnforcer, HttpRemnaReader, PanelVersionState } from './remnawave/http.js';
 import { MockRemna } from './remnawave/mock.js';
 import type { RemnaEnforcer, RemnaReader } from './remnawave/types.js';
@@ -12,6 +14,40 @@ import { startApi, loadScoringConfig } from './api/server.js';
 import { createIpinfoRefiner } from './geo/refine.js';
 import { bus } from './events.js';
 
+/**
+ * Гео-базы DB-IP Lite выходят раз в месяц. Нет файлов — качаем до старта коллектора (иначе
+ * первые циклы дадут пустые ASN/страны); дальше раз в сутки проверяем возраст, протухшие
+ * перекачиваем, перечитываем и пересчитываем кэш ip_meta.
+ */
+async function startGeoipRefresh(mmdb: MmdbGeoProvider, engine: ScoringEngine): Promise<void> {
+  const { GEOIP_CITY_MMDB: city, GEOIP_ASN_MMDB: asn } = env;
+  let running = false;
+  const refresh = async (): Promise<void> => {
+    if (running || !geoipStale(city, asn)) return;
+    running = true;
+    try {
+      console.log(`[geo] mmdb-баз нет или они старше ${GEOIP_MAX_AGE_DAYS} дней — качаю DB-IP Lite…`);
+      await downloadGeoip(city, asn, (line) => console.log(`[geo] ${line}`));
+      mmdb.reload();
+      const n = engine.rebuildIpMeta();
+      console.log(`[geo] базы обновлены, кэш пересчитан по ${n} IP`);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[geo] не удалось обновить базы (${reason}). ` +
+          (mmdb.ready.city && mmdb.ready.asn ? 'Работаю на старых' : 'Гео/ASN-сигналы будут пустыми') +
+          ', повторю через сутки',
+      );
+    } finally {
+      running = false;
+    }
+  };
+  // без баз ждём закачку, с базами проверяем возраст фоном, не задерживая API
+  if (!fs.existsSync(city) || !fs.existsSync(asn)) await refresh();
+  else void refresh();
+  setInterval(() => void refresh(), 24 * 3600_000).unref();
+}
+
 async function main(): Promise<void> {
   console.log(`RemnaMatcher server, MODE=${env.MODE}`);
   // у мока своя база — переключение режимов не трогает боевые данные
@@ -21,6 +57,7 @@ async function main(): Promise<void> {
   let reader: RemnaReader;
   let enforcer: RemnaEnforcer;
   let geo: GeoProvider;
+  let mmdb: MmdbGeoProvider | null = null;
 
   if (env.MODE === 'live') {
     assertLiveConfig(env);
@@ -29,13 +66,7 @@ async function main(): Promise<void> {
     const panelVersion = new PanelVersionState();
     reader = new HttpRemnaReader(httpOpts, panelVersion);
     enforcer = new HttpRemnaEnforcer(httpOpts, panelVersion);
-    const mmdb = new MmdbGeoProvider(env.GEOIP_CITY_MMDB, env.GEOIP_ASN_MMDB);
-    if (!mmdb.ready.city || !mmdb.ready.asn) {
-      console.warn(
-        `[geo] mmdb-базы не найдены (${env.GEOIP_CITY_MMDB}, ${env.GEOIP_ASN_MMDB}). ` +
-          'Гео/ASN-сигналы будут пустыми. Скачай базы: npm run -w server geoip',
-      );
-    }
+    mmdb = new MmdbGeoProvider(env.GEOIP_CITY_MMDB, env.GEOIP_ASN_MMDB);
     geo = mmdb;
   } else {
     // мок генерит новые случайные id при каждом старте — чистим базу,
@@ -63,6 +94,8 @@ async function main(): Promise<void> {
   const engine = new ScoringEngine(db, geo, () => loadScoringConfig(db));
   const actions = new Actions(db, enforcer);
   const collector = new Collector(db, reader, engine, () => loadScoringConfig(db), actions);
+
+  if (mmdb) await startGeoipRefresh(mmdb, engine);
 
   startTelegram({
     token: env.TELEGRAM_BOT_TOKEN,
@@ -101,12 +134,15 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
-// сетевые сбои (VPN, недоступность панели) не должны убивать процесс
+// сетевые сбои (VPN, недоступность панели) в забытых промисах не должны убивать процесс
 process.on('unhandledRejection', (err) => {
   console.error('[fatal-guard] unhandled rejection:', err);
 });
+// необработанное исключение — процесс в неизвестном состоянии: честнее упасть,
+// docker (restart: unless-stopped) поднимет чистый
 process.on('uncaughtException', (err) => {
-  console.error('[fatal-guard] uncaught exception:', err);
+  console.error('[fatal] uncaught exception, завершаюсь:', err);
+  process.exit(1);
 });
 
 main().catch((err) => {

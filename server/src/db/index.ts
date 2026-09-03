@@ -50,7 +50,8 @@ export function openDb(dbPath: string): Database.Database {
       status        TEXT NOT NULL DEFAULT 'never',   -- never|online|offline (TCP-доступность)
       agent_status  TEXT NOT NULL DEFAULT 'none',    -- none|installing|connected|error
       agent_port    INTEGER,                         -- порт агента на ноде
-      agent_fp      TEXT,                            -- SHA-256 отпечаток TLS-сертификата агента; NULL — старый агент по HTTP
+      agent_fp      TEXT,                            -- SHA-256 отпечаток TLS-сертификата агента; NULL — старый агент без TLS
+      ssh_host_fp   TEXT,                            -- SHA-256 отпечаток ключа хоста SSH (TOFU); NULL — ещё не подключались
       last_error    TEXT,
       os            TEXT,
       kernel        TEXT,
@@ -104,6 +105,7 @@ export function openDb(dbPath: string): Database.Database {
     'ALTER TABLE red_servers ADD COLUMN agent_port INTEGER',
     'ALTER TABLE red_servers ADD COLUMN ssh_pass TEXT', // сохранённый SSH-пароль (шифрованный) — чтобы не вводить повторно
     'ALTER TABLE red_servers ADD COLUMN agent_fp TEXT', // SHA-256 отпечаток TLS-сертификата агента (пин)
+    'ALTER TABLE red_servers ADD COLUMN ssh_host_fp TEXT', // отпечаток ключа хоста SSH — сверяется при каждом подключении
     // конфигурации: трафик и срок подписки из заголовка subscription-userinfo (как в Happ)
     'ALTER TABLE red_subscriptions ADD COLUMN traffic_used INTEGER',
     'ALTER TABLE red_subscriptions ADD COLUMN traffic_total INTEGER',

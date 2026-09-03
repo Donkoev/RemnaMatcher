@@ -6,6 +6,9 @@ import { bus, type IncidentEvent } from '../events.js';
 
 const LEVEL_EMOJI: Record<string, string> = { yellow: '🟡', orange: '🟠', red: '🔴' };
 
+/** действия с кнопок уведомления — callback_data клиент может прислать любой, верим только этим */
+const TG_ACTIONS: ReadonlySet<string> = new Set<ActionName>(['revoke', 'disable', 'drop', 'whitelist']);
+
 /** вероятность утечки нормируется на порог красного уровня */
 const leakPct = (score: number, red: number): number => Math.min(100, Math.floor((score / red) * 100));
 
@@ -90,7 +93,7 @@ export function startTelegram(opts: {
     const data = ctx.callbackQuery.data;
     const [kind, action, userIdStr] = data.split(':');
     const userId = Number(userIdStr);
-    if (!action || !Number.isFinite(userId)) {
+    if (!action || !Number.isFinite(userId) || (kind !== 'cancel' && !TG_ACTIONS.has(action))) {
       await ctx.answerCallbackQuery();
       return;
     }

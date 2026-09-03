@@ -4,10 +4,11 @@ import { Agent, buildConnector, request } from 'undici';
 // HTTP-клиент к агенту на ноде. Все запросы несут X-Agent-Token.
 // Панель проверяет присутствие агента и толкает ему обновления кода.
 //
-// Транспорт: агент, поставленный панелью, слушает TLS на самоподписанном сертификате,
-// а панель ПРИКАЛЫВАЕТ его SHA-256 отпечаток (снят по SSH при установке — доверенный канал).
-// Так токен и код агента не ходят открытым текстом, а подмену сервера панель отвергает.
-// Агенты старых установок (без сертификата, fp = null) опрашиваются по HTTP — до переустановки.
+// Транспорт — только TLS на самоподписанном сертификате ноды, чей SHA-256 отпечаток панель
+// ПРИКОЛОЛА при установке (снят по SSH — доверенный канал). Так токен и код агента не ходят
+// открытым текстом, а подмену сервера панель отвергает. Открытого HTTP нет: токен даёт
+// /self-update, то есть выполнение кода на ноде, и показывать его по пути нельзя никому.
+// Агент старой установки без сертификата панель не опрашивает — его надо переустановить.
 
 // Держим соединение к агенту живым между тиками поллера: новые TCP-потоки до ноды
 // на флапающем канале иногда молча теряются, а уже установленное соединение работает.
@@ -35,12 +36,10 @@ function pinnedConnector(fp: string): buildConnector.connector {
   };
 }
 
-// диспетчер на каждый отпечаток (у каждой ноды свой сертификат) + один общий для HTTP
-const plainDispatcher = new Agent({ keepAliveTimeout: KEEP_ALIVE_MS, connections: 2 });
+// диспетчер на каждый отпечаток (у каждой ноды свой сертификат)
 const pinnedDispatchers = new Map<string, Agent>();
 
-function dispatcherFor(fp: string | null): Agent {
-  if (!fp) return plainDispatcher;
+function dispatcherFor(fp: string): Agent {
   let d = pinnedDispatchers.get(fp);
   if (!d) {
     d = new Agent({ keepAliveTimeout: KEEP_ALIVE_MS, connections: 2, connect: pinnedConnector(fp) });
@@ -49,12 +48,12 @@ function dispatcherFor(fp: string | null): Agent {
   return d;
 }
 
-/** адрес агента: сертификат есть — TLS, нет — старый агент по открытому HTTP */
+/** адрес агента: сертификат приколот при установке — без него к агенту не ходим */
 export interface AgentAddr {
   host: string;
   port: number;
   token: string;
-  fp: string | null;
+  fp: string;
 }
 
 async function call(
@@ -64,7 +63,7 @@ async function call(
   body?: unknown,
   timeoutMs = TIMEOUT_MS,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await request(`${a.fp ? 'https' : 'http'}://${a.host}:${a.port}${path}`, {
+  const res = await request(`https://${a.host}:${a.port}${path}`, {
     method,
     dispatcher: dispatcherFor(a.fp),
     headers: { 'X-Agent-Token': a.token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
