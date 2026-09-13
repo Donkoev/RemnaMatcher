@@ -19,6 +19,9 @@ export class Collector {
   private stopped = false;
   private lastUserSync = 0;
   private lastMetaPrune = 0;
+  /** идущий синк справочника — следующий не стартует, пока не кончится этот */
+  private userSync: Promise<void> | null = null;
+  private thinning = false;
 
   constructor(
     private db: Database.Database,
@@ -55,10 +58,14 @@ export class Collector {
     const t0 = Date.now();
     const cc = this.getConfig().collector;
 
-    // синк справочника идёт параллельно с опросом нод: это независимые запросы к панели,
-    // а на десятках тысяч юзеров его страницы иначе задерживали бы старт всего круга
-    const userSync =
-      t0 - this.lastUserSync > cc.userSyncIntervalSec * 1000 ? this.syncUsersAndDevices(t0) : null;
+    // синк справочника — отдельно от круга: он не должен ни задерживать опрос нод, ни держать
+    // завершение круга, если панель отдаёт список юзеров медленно. Круг обязан заканчиваться
+    // сам по себе — от этого зависит окно «нода онлайн» и свежесть наблюдений
+    if (t0 - this.lastUserSync > cc.userSyncIntervalSec * 1000 && !this.userSync) {
+      this.userSync = this.syncUsersAndDevices(t0).finally(() => {
+        this.userSync = null;
+      });
+    }
 
     const nodes = (await this.remna.getNodes()).filter((n) => !n.isDisabled);
     let nodesOk = 0;
@@ -79,6 +86,15 @@ export class Collector {
        ON CONFLICT(node_uuid) DO UPDATE SET
          name = excluded.name, country = excluded.country, last_ok_at = excluded.last_ok_at,
          last_err = excluded.last_err, users_seen = excluded.users_seen, ips_seen = excluded.ips_seen`,
+    );
+    // сбой одного круга не гасит ноду: last_ok_at остаётся от последнего успеха, «онлайн» решает
+    // окно на дашборде — ноду, которая не отвечает дольше окна, оно выключит само; причина — в last_err
+    const markNodeError = this.db.prepare(
+      `INSERT INTO node_status (node_uuid, name, country, last_ok_at, last_err, users_seen, ips_seen)
+       VALUES (?, ?, ?, NULL, ?, 0, 0)
+       ON CONFLICT(node_uuid) DO UPDATE SET
+         name = excluded.name, country = excluded.country, last_err = excluded.last_err,
+         users_seen = 0, ips_seen = 0`,
     );
 
     // Опрос параллельным пулом: job выполняется агентом на самой ноде, панель лишь
@@ -111,7 +127,7 @@ export class Collector {
         nodesFailed++;
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[collector] node ${node.name}: ${msg}`);
-        upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, msg, 0, 0);
+        markNodeError.run(node.uuid, node.name, node.countryCode, msg);
       }
     };
 
@@ -122,7 +138,7 @@ export class Collector {
     const queue: typeof nodes = [];
     for (const node of nodes) {
       if (!node.isConnected) {
-        upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, 'нода не подключена к панели', 0, 0);
+        markNodeError.run(node.uuid, node.name, node.countryCode, 'нода не подключена к панели');
       } else if ((node.usersOnline ?? 1) <= 0) {
         nodesIdle++;
         upsertNodeStatus.run(node.uuid, node.name, node.countryCode, Date.now(), null, 0, 0);
@@ -142,8 +158,6 @@ export class Collector {
     });
     await Promise.all(workers);
     if (this.stopped) return;
-
-    if (userSync) await userSync;
 
     // репорты торрент-блокера (панель хранит последние — дедуп по id)
     try {
@@ -360,17 +374,29 @@ export class Collector {
    * тик в час. Тик общий для всех юзеров, поэтому чистим целыми тиками по индексу ts.
    */
   private thinSnapshots(): void {
-    const now = Date.now();
-    const ticks = this.db
-      .prepare<[number], { ts: number }>('SELECT DISTINCT ts FROM traffic_snapshots WHERE ts < ? ORDER BY ts')
-      .all(now - SNAPSHOT_TIERS[0]!.olderThanMs)
-      .map((r) => r.ts);
-    const drop = ticksToDrop(ticks, now);
-    if (drop.length === 0) return;
-    const del = this.db.prepare('DELETE FROM traffic_snapshots WHERE ts = ?');
-    const tx = this.db.transaction(() => {
-      for (const ts of drop) del.run(ts);
-    });
-    tx();
+    if (this.thinning) return;
+    this.thinning = true;
+    void (async () => {
+      try {
+        const now = Date.now();
+        const ticks = this.db
+          .prepare<[number], { ts: number }>('SELECT DISTINCT ts FROM traffic_snapshots WHERE ts < ? ORDER BY ts')
+          .all(now - SNAPSHOT_TIERS[0]!.olderThanMs)
+          .map((r) => r.ts);
+        const drop = ticksToDrop(ticks, now);
+        const del = this.db.prepare('DELETE FROM traffic_snapshots WHERE ts = ?');
+        // тик за тиком и с передышкой между ними: первое прореживание после обновления снимает
+        // миллионы строк, одной транзакцией это заморозило бы API и опрос нод на минуты
+        for (const ts of drop) {
+          if (this.stopped) return;
+          del.run(ts);
+          await sleep(0);
+        }
+      } catch (err) {
+        console.error('[collector] прореживание снапшотов:', err instanceof Error ? err.message : err);
+      } finally {
+        this.thinning = false;
+      }
+    })();
   }
 }

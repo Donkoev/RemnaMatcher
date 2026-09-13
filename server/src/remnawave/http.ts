@@ -119,7 +119,8 @@ export class HttpRemnaReader implements RemnaReader {
       try {
         return await this.getAllUsersByCursor();
       } catch (err) {
-        if (!is404(err)) throw err; // ранняя 3.x без /users/stream — постранично
+        // ранняя 3.x без /users/stream, сбой сети или странный курсор — постраничный путь надёжнее
+        console.warn(`[remna] /api/users/stream не сработал (${err instanceof Error ? err.message : String(err)}) — читаю постранично`);
       }
     }
     return this.getAllUsersByOffset();
@@ -145,7 +146,7 @@ export class HttpRemnaReader implements RemnaReader {
   private async getAllUsersByCursor(): Promise<RemnaUser[]> {
     const users: RemnaUser[] = [];
     let cursor: string | null = null;
-    for (;;) {
+    for (let page = 0; ; page++) {
       const query = `size=${USERS_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
       const data: { response: { users: RawUser[]; nextCursor: string | null; hasMore: boolean } } = await api(
         this.opts,
@@ -153,8 +154,11 @@ export class HttpRemnaReader implements RemnaReader {
         `/api/users/stream?${query}`,
       );
       for (const u of data.response.users) users.push(mapUser(u));
-      if (!data.response.hasMore || !data.response.nextCursor || data.response.users.length === 0) break;
-      cursor = data.response.nextCursor;
+      const next = data.response.nextCursor;
+      if (!data.response.hasMore || !next || data.response.users.length === 0) break;
+      // страховка от зацикливания: курсор обязан двигаться, а страниц не бывает тысячами
+      if (next === cursor || page > 5000) throw new Error('курсор не движется');
+      cursor = next;
     }
     return users;
   }
