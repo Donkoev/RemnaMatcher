@@ -10,8 +10,10 @@ export type Level = 'green' | 'yellow' | 'orange' | 'red';
 export interface Overview {
   /** окно «нода онлайн», мс — минимум 5 минут либо два цикла коллектора */
   nodeOnlineWindowMs: number;
-  /** последний завершённый круг опроса: когда закончился и сколько занял */
+  /** последний завершённый круг опроса: когда закончился и сколько занял (переживает рестарт) */
   lastCycle: { at: number; durationMs: number } | null;
+  /** когда поднялся процесс сервера: круг старше запуска — был рестарт посреди работы */
+  startedAt: number;
   /** окно «активных IP»: настроенное и фактическое — растягивается, если круг опроса длиннее окна */
   activeWindow: { configuredMs: number; effectiveMs: number };
   mode: 'mock' | 'live';

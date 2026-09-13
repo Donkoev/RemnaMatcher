@@ -158,21 +158,30 @@ export class HttpRemnaReader implements RemnaReader {
   }
 
   async getAllUsers(): Promise<RemnaUser[]> {
+    const users: RemnaUser[] = [];
+    await this.streamUsers((page) => {
+      users.push(...page);
+    });
+    return users;
+  }
+
+  async streamUsers(onPage: (users: RemnaUser[]) => void | Promise<void>): Promise<number> {
     // 3.x отдаёт юзеров keyset-курсором — без OFFSET, который на десятках тысяч строк
     // с каждой страницей всё медленнее; на 2.7.x и до детекта версии — постранично
     if (this.ver.v === '3') {
       try {
-        return await this.getAllUsersByCursor();
+        return await this.streamUsersByCursor(onPage);
       } catch (err) {
-        // ранняя 3.x без /users/stream, сбой сети или странный курсор — постраничный путь надёжнее
+        // ранняя 3.x без /users/stream, сбой сети или странный курсор — постраничный путь надёжнее;
+        // уже отданные страницы придут повторно — записи в базу идемпотентны
         console.warn(`[remna] /api/users/stream не сработал (${err instanceof Error ? err.message : String(err)}) — читаю постранично`);
       }
     }
-    return this.getAllUsersByOffset();
+    return this.streamUsersByOffset(onPage);
   }
 
-  private async getAllUsersByOffset(): Promise<RemnaUser[]> {
-    const users: RemnaUser[] = [];
+  private async streamUsersByOffset(onPage: (users: RemnaUser[]) => void | Promise<void>): Promise<number> {
+    let count = 0;
     for (let start = 0; ; start += USERS_PAGE) {
       const data = await api<{ response: { total: number; users: RawUser[] } }>(
         this.opts,
@@ -182,14 +191,16 @@ export class HttpRemnaReader implements RemnaReader {
       // детект версии панели: 2.7.x отдаёт uuid юзера в списке, 3.x — нет
       const first = data.response.users[0];
       if (first) this.ver.set(first.uuid !== undefined ? '2' : '3');
-      for (const u of data.response.users) users.push(mapUser(u));
-      if (users.length >= data.response.total || data.response.users.length === 0) break;
+      const page = data.response.users.map(mapUser);
+      count += page.length;
+      if (page.length > 0) await onPage(page);
+      if (count >= data.response.total || page.length === 0) break;
     }
-    return users;
+    return count;
   }
 
-  private async getAllUsersByCursor(): Promise<RemnaUser[]> {
-    const users: RemnaUser[] = [];
+  private async streamUsersByCursor(onPage: (users: RemnaUser[]) => void | Promise<void>): Promise<number> {
+    let count = 0;
     let cursor: string | null = null;
     for (let page = 0; ; page++) {
       const query = `size=${USERS_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
@@ -198,14 +209,16 @@ export class HttpRemnaReader implements RemnaReader {
         'GET',
         `/api/users/stream?${query}`,
       );
-      for (const u of data.response.users) users.push(mapUser(u));
+      const batch = data.response.users.map(mapUser);
+      count += batch.length;
+      if (batch.length > 0) await onPage(batch);
       const next = data.response.nextCursor;
-      if (!data.response.hasMore || !next || data.response.users.length === 0) break;
+      if (!data.response.hasMore || !next || batch.length === 0) break;
       // страховка от зацикливания: курсор обязан двигаться, а страниц не бывает тысячами
       if (next === cursor || page > 5000) throw new Error('курсор не движется');
       cursor = next;
     }
-    return users;
+    return count;
   }
 
   async getAllHwidDevices(start: number, size: number): Promise<{ devices: HwidDevice[]; total: number }> {

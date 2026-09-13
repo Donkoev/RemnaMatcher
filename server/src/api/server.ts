@@ -193,11 +193,24 @@ export async function startApi(opts: {
     return reply.setCookie(SESSION_COOKIE, token, cookieOpts).send({ ok: true });
   });
 
+  const STARTED_AT = Date.now();
   // последний цикл коллектора: длительность нужна и для окна «нода онлайн»
-  // (на сотнях нод круг дольше 5 минут), и для показа реального времени опроса в UI
+  // (на сотнях нод круг дольше 5 минут), и для показа реального времени опроса в UI.
+  // Хранится в settings и переживает рестарт: по нему видно, когда круг завершался
+  // в последний раз, даже если процесс с тех пор перезапускался
   let lastCycle = { at: 0, durationMs: 60_000 };
+  const persistedCycle = db.prepare<[string], { value: string }>('SELECT value FROM settings WHERE key = ?').get('last_cycle');
+  if (persistedCycle) {
+    try {
+      const p = JSON.parse(persistedCycle.value) as { at?: unknown; durationMs?: unknown };
+      if (typeof p.at === 'number' && typeof p.durationMs === 'number') lastCycle = { at: p.at, durationMs: p.durationMs };
+    } catch {
+      /* битая запись — начнём с чистого */
+    }
+  }
   bus.on('cycle', (ev) => {
     lastCycle = { at: ev.at, durationMs: ev.durationMs };
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('last_cycle', JSON.stringify(lastCycle));
   });
   // окно «активных IP» — то же, что у движка: растянуто до круга опроса, если тот длиннее окна
   const activeWindowMs = (cfg: ScoringConfig): number =>
@@ -243,6 +256,8 @@ export async function startApi(opts: {
       // нода «онлайн», если опрошена в пределах двух циклов (минимум 5 минут)
       nodeOnlineWindowMs: Math.max(300_000, lastCycle.durationMs * 2 + 60_000),
       lastCycle: lastCycle.at > 0 ? lastCycle : null,
+      // когда поднялся процесс: круг старше запуска означает рестарт посреди работы
+      startedAt: STARTED_AT,
       activeWindow: { configuredMs: cfg.activeWindowMin * 60_000, effectiveMs: windowMs },
     };
   });
@@ -687,19 +702,24 @@ export async function startApi(opts: {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
     });
-    const send = (type: string, data: unknown) => {
-      reply.raw.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+    // клиент мог отвалиться между событием и записью: в мёртвый сокет не пишем —
+    // ошибка записи без обработчика была бы необработанным исключением на весь процесс
+    const write = (chunk: string) => {
+      if (!reply.raw.destroyed && reply.raw.writable) reply.raw.write(chunk);
     };
+    const send = (type: string, data: unknown) => write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
     const onCycle = (ev: unknown) => send('cycle', ev);
     const onIncident = (ev: unknown) => send('incident', ev);
     bus.on('cycle', onCycle);
     bus.on('incident', onIncident);
-    const ping = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
-    req.raw.on('close', () => {
+    const ping = setInterval(() => write(': ping\n\n'), 25_000);
+    const cleanup = () => {
       clearInterval(ping);
       bus.off('cycle', onCycle);
       bus.off('incident', onIncident);
-    });
+    };
+    req.raw.on('close', cleanup);
+    reply.raw.on('error', cleanup);
   });
 
   await app.listen({ port, host: '0.0.0.0' });

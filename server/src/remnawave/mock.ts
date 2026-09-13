@@ -130,6 +130,12 @@ export class MockRemna implements RemnaReader, RemnaEnforcer {
     return NODES;
   }
 
+  async streamUsers(onPage: (users: RemnaUser[]) => void | Promise<void>): Promise<number> {
+    const users = await this.getAllUsers();
+    await onPage(users);
+    return users.length;
+  }
+
   async getAllUsers(): Promise<RemnaUser[]> {
     for (const st of this.users.values()) {
       const online = st.active.size > 0 || Math.random() < 0.4;

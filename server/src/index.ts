@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import v8 from 'node:v8';
 import { env, assertLiveConfig } from './config.js';
 import { openDb } from './db/index.js';
 import { MockGeoProvider, MmdbGeoProvider, type GeoProvider } from './geo/index.js';
@@ -49,7 +51,12 @@ async function startGeoipRefresh(mmdb: MmdbGeoProvider, engine: ScoringEngine): 
 }
 
 async function main(): Promise<void> {
-  console.log(`RemnaMatcher server, MODE=${env.MODE}`);
+  // лимит кучи и ОЗУ — в лог при старте: если процесс перезапускается, по этим цифрам
+  // и rss в строках круга видно, упирается ли он в память
+  console.log(
+    `RemnaMatcher server, MODE=${env.MODE} · куча до ${Math.round(v8.getHeapStatistics().heap_size_limit / 1048576)} МБ, ` +
+      `ОЗУ ${Math.round(os.totalmem() / 1048576)} МБ`,
+  );
   // у мока своя база — переключение режимов не трогает боевые данные
   const dbPath = env.MODE === 'mock' ? env.DB_PATH.replace(/\.db$/, '-mock.db') : env.DB_PATH;
   const db = openDb(dbPath);
@@ -138,11 +145,10 @@ async function main(): Promise<void> {
 process.on('unhandledRejection', (err) => {
   console.error('[fatal-guard] unhandled rejection:', err);
 });
-// необработанное исключение — процесс в неизвестном состоянии: честнее упасть,
-// docker (restart: unless-stopped) поднимет чистый
+// необработанное исключение процесс НЕ роняет: рестарт посреди круга опроса оставляет
+// панель без данных, а у коллектора, API и бота свои перехваты. Что упало — в логе со стеком
 process.on('uncaughtException', (err) => {
-  console.error('[fatal] uncaught exception, завершаюсь:', err);
-  process.exit(1);
+  console.error('[fatal-guard] uncaught exception:', err);
 });
 
 main().catch((err) => {

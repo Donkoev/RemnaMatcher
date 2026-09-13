@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { RemnaReader } from '../remnawave/types.js';
+import type { HwidDevice, RemnaReader, RemnaUser } from '../remnawave/types.js';
 import type { ScoringEngine } from '../scoring/engine.js';
 import type { ScoringConfig } from '../scoring/rules.js';
 import type { Actions } from '../actions.js';
@@ -207,9 +207,11 @@ export class Collector {
       .slice(0, 3)
       .map(([reason, n]) => `${n}× ${reason}`)
       .join('; ');
+    // память — в каждой строке: рост от круга к кругу виден в docker logs раньше, чем OOM
+    const rssMb = Math.round(process.memoryUsage().rss / 1048576);
     console.log(
       `[collector] круг ${(durationMs / 1000).toFixed(1)} с: опрошено ${nodesOk} нод, пустых ${nodesIdle}, ` +
-        `с ошибкой ${nodesFailed}; юзеров ${usersSeen}, IP ${ipsSeen}${topReasons ? ` | ${topReasons}` : ''}`,
+        `с ошибкой ${nodesFailed}; юзеров ${usersSeen}, IP ${ipsSeen}; rss ${rssMb} МБ${topReasons ? ` | ${topReasons}` : ''}`,
     );
 
     bus.emit('cycle', {
@@ -242,7 +244,6 @@ export class Collector {
   }
 
   private async syncUsers(now: number): Promise<void> {
-    const users = await this.remna.getAllUsers();
     const upsertUser = this.db.prepare(
       `INSERT INTO users (id, uuid, short_uuid, username, status, telegram_id, email, tag, used_traffic, traffic_limit, hwid_limit, sub_url, online_at, expire_at, description, synced_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -256,12 +257,11 @@ export class Collector {
     const insertSnapshot = this.db.prepare(
       'INSERT OR IGNORE INTO traffic_snapshots (user_id, ts, used) VALUES (?, ?, ?)',
     );
-    let pruned = 0;
-    // пачками с передышкой: одна транзакция на десятки тысяч юзеров держит event loop секунды,
-    // а в это время висят запросы за результатами job по нодам — их таймауты не должны страдать
-    const BATCH = 5000;
-    const upsertBatch = this.db.transaction((batch: typeof users) => {
-      for (const u of batch) {
+    // страница за страницей, каждая своей транзакцией с передышкой: список юзеров целиком
+    // в памяти не держим (на сотнях тысяч это сотни мегабайт), а event loop между страницами
+    // отдаём запросам за результатами job по нодам — их таймауты не должны страдать
+    const upsertPage = this.db.transaction((page: RemnaUser[]) => {
+      for (const u of page) {
         upsertUser.run(
           u.id,
           u.uuid,
@@ -283,15 +283,16 @@ export class Collector {
         insertSnapshot.run(u.id, now, u.usedTrafficBytes);
       }
     });
-    for (let i = 0; i < users.length; i += BATCH) {
+    const total = await this.remna.streamUsers(async (page) => {
       if (this.stopped) return;
-      upsertBatch(users.slice(i, i + BATCH));
+      upsertPage(page);
       await sleep(0);
-    }
+    });
     // юзеры, которых панель больше не отдаёт, удалены из неё — сносим их вместе с текущим
     // состоянием, иначе призраки копятся вечно. История (инциденты, журнал, hwid) остаётся.
     // Пустой ответ панели считаем сбоем, а не «всех удалили»
-    if (users.length > 0) {
+    let pruned = 0;
+    if (total > 0 && !this.stopped) {
       const prune = this.db.transaction(() => {
         pruned = this.db.prepare('DELETE FROM users WHERE synced_at < ?').run(now).changes;
         if (pruned > 0) {
@@ -302,7 +303,7 @@ export class Collector {
       });
       prune();
     }
-    console.log(`[collector] user sync: ${users.length} users${pruned > 0 ? `, удалено из панели: ${pruned}` : ''}`);
+    console.log(`[collector] user sync: ${total} users${pruned > 0 ? `, удалено из панели: ${pruned}` : ''}`);
   }
 
   /**
@@ -313,10 +314,17 @@ export class Collector {
   private async syncHwidDevices(now: number): Promise<void> {
     const pageSize = 500;
     const seen = new Set<string>();
-    // панель отдаёт uuid юзера — маппим на наш числовой id
-    const uuidToId = new Map(
-      this.db.prepare<[], { id: number; uuid: string }>('SELECT id, uuid FROM users').all().map((u) => [u.uuid, u.id]),
-    );
+    // панель 2.7.x отдаёт uuid юзера вместо id — карту uuid→id по всему справочнику
+    // строим только когда она реально понадобилась (на 3.x — никогда)
+    let uuidToId: Map<string, number> | null = null;
+    const idOf = (d: HwidDevice): number | undefined => {
+      if (d.userId !== undefined) return d.userId;
+      if (d.userUuid === undefined) return undefined;
+      uuidToId ??= new Map(
+        this.db.prepare<[], { id: number; uuid: string }>('SELECT id, uuid FROM users').all().map((u) => [u.uuid, u.id]),
+      );
+      return uuidToId.get(d.userUuid);
+    };
     const upsert = this.db.prepare(
       `INSERT INTO hwid_devices (hwid, user_id, platform, os_version, device_model, user_agent, first_seen, last_seen, deleted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
@@ -332,7 +340,7 @@ export class Collector {
       const tx = this.db.transaction(() => {
         for (const d of page.devices) {
           // панель 3.x отдаёт числовой userId, 2.7.x — uuid юзера
-          const userId = d.userId ?? (d.userUuid !== undefined ? uuidToId.get(d.userUuid) : undefined);
+          const userId = idOf(d);
           if (userId === undefined) continue; // юзер ещё не в справочнике — доедет со следующим синком
           upsert.run(d.hwid, userId, d.platform, d.osVersion, d.deviceModel, d.userAgent, now, now);
           seen.add(`${d.hwid} ${userId}`);

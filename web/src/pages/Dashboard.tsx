@@ -143,6 +143,15 @@ export function Dashboard() {
                     ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}${windowNote}`
                     : 'ждём первый опрос'}
                 </Text>
+                {overview && (
+                  // круг завершался до запуска процесса — значит, был рестарт; повторяется — процесс падает
+                  <Text c={!overview.lastCycle || overview.lastCycle.at < overview.startedAt ? 'orange' : 'dimmed'} fz="xs">
+                    сервер запущен {timeAgo(overview.startedAt)}
+                    {overview.lastCycle && overview.lastCycle.at < overview.startedAt
+                      ? ' — после последнего круга был перезапуск; если это повторяется, смотри docker logs'
+                      : ''}
+                  </Text>
+                )}
                 {brokenByReason.slice(0, 6).map(([reason, { count, names }]) => (
                   <Text fz="xs" key={reason}>
                     {count} × {reason}
