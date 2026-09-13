@@ -91,6 +91,11 @@ export function Dashboard() {
         ? `${Math.round(overview.lastCycle.durationMs / 1000)} с`
         : `${(overview.lastCycle.durationMs / 60_000).toFixed(1)} мин`
     : null;
+  // круг длиннее окна активных IP — окно растянуто, об этом стоит знать
+  const windowNote =
+    overview && overview.activeWindow.effectiveMs > overview.activeWindow.configuredMs
+      ? `; окно активных IP растянуто до ${Math.ceil(overview.activeWindow.effectiveMs / 60_000)} мин — круг длиннее настроенного окна`
+      : '';
 
   return (
     <>
@@ -127,7 +132,7 @@ export function Dashboard() {
               brokenNodes.length > 0
                 ? `нет данных: ${brokenNodes.map((n) => n.name).join(', ')}`
                 : overview?.lastCycle
-                  ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}`
+                  ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}${windowNote}`
                   : 'ждём первый опрос'
             }
           >

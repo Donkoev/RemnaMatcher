@@ -19,15 +19,15 @@ interface MockUserState {
 
 // Реальные ноды панели
 const NODES: RemnaNode[] = [
-  { uuid: 'node-cloud', name: 'Cloud', countryCode: 'RU', isConnected: true, isDisabled: false },
-  { uuid: 'node-ee-1', name: 'Estonia', countryCode: 'EE', isConnected: true, isDisabled: false },
-  { uuid: 'node-ee-3', name: 'Estonia3', countryCode: 'EE', isConnected: true, isDisabled: false },
-  { uuid: 'node-ee-4', name: 'Estonia4', countryCode: 'EE', isConnected: true, isDisabled: false },
-  { uuid: 'node-fr-1', name: 'France-estx', countryCode: 'FR', isConnected: true, isDisabled: false },
-  { uuid: 'node-de-1', name: 'Germany-AV1', countryCode: 'DE', isConnected: true, isDisabled: false },
-  { uuid: 'node-de-2', name: 'Germany-AV2', countryCode: 'DE', isConnected: true, isDisabled: false },
-  { uuid: 'node-de-r', name: 'Germany-Routing', countryCode: 'DE', isConnected: true, isDisabled: false },
-  { uuid: 'node-nl-1', name: 'Netherlands-estx', countryCode: 'NL', isConnected: true, isDisabled: false },
+  { uuid: 'node-cloud', name: 'Cloud', usersOnline: 1200, countryCode: 'RU', isConnected: true, isDisabled: false },
+  { uuid: 'node-ee-1', name: 'Estonia', usersOnline: 900, countryCode: 'EE', isConnected: true, isDisabled: false },
+  { uuid: 'node-ee-3', name: 'Estonia3', usersOnline: 700, countryCode: 'EE', isConnected: true, isDisabled: false },
+  { uuid: 'node-ee-4', name: 'Estonia4', usersOnline: 500, countryCode: 'EE', isConnected: true, isDisabled: false },
+  { uuid: 'node-fr-1', name: 'France-estx', usersOnline: 650, countryCode: 'FR', isConnected: true, isDisabled: false },
+  { uuid: 'node-de-1', name: 'Germany-AV1', usersOnline: 800, countryCode: 'DE', isConnected: true, isDisabled: false },
+  { uuid: 'node-de-2', name: 'Germany-AV2', usersOnline: 400, countryCode: 'DE', isConnected: true, isDisabled: false },
+  { uuid: 'node-de-r', name: 'Germany-Routing', usersOnline: 60, countryCode: 'DE', isConnected: true, isDisabled: false },
+  { uuid: 'node-nl-1', name: 'Netherlands-estx', usersOnline: 300, countryCode: 'NL', isConnected: true, isDisabled: false },
 ];
 
 function randInt(min: number, max: number): number {

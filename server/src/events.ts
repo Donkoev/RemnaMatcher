@@ -17,6 +17,8 @@ export interface CycleEvent {
   durationMs: number;
   nodesOk: number;
   nodesTotal: number;
+  /** ноды без онлайн-юзеров, пропущенные без запроса */
+  nodesIdle: number;
   usersSeen: number;
   ipsSeen: number;
 }

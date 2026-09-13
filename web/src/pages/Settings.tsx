@@ -219,7 +219,7 @@ export function Settings() {
               value={cfg.collector.pollIntervalSec}
             />
             <NumberInput
-              description="Если ноды фейлятся — уменьшите"
+              description="Панель держит 5 (2.7) или 10 (3.x) job разом — выше не ускорит"
               label="Параллельность опроса"
               max={20}
               min={1}

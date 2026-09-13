@@ -10,6 +10,8 @@ export interface RemnaNode {
   countryCode: string;
   isConnected: boolean;
   isDisabled: boolean;
+  /** онлайн-юзеров на ноде по счётчику панели (обновляется раз в 30 с); нет поля — считаем, что есть */
+  usersOnline?: number;
 }
 
 export interface RemnaUser {

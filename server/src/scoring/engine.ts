@@ -9,6 +9,7 @@ import {
   type ScoringConfig,
   type Signal,
 } from './rules.js';
+import { effectiveActiveWindowMs } from './window.js';
 
 const LEVEL_ORDER: Record<Level, number> = { green: 0, yellow: 1, orange: 2, red: 3 };
 
@@ -100,10 +101,19 @@ export class ScoringEngine {
     };
   }
 
-  /** Прогон скоринга по всем юзерам с активными IP. Вызывается после каждого цикла опроса нод. */
-  run(now = Date.now()): void {
-    const cfg = this.getConfig();
-    const windowStart = now - cfg.activeWindowMin * 60_000;
+  /**
+   * Прогон скоринга по всем юзерам с активными IP. Вызывается после каждого круга опроса нод;
+   * длительность круга растягивает окно активности, если круг оказался длиннее окна.
+   */
+  run(now = Date.now(), cycleDurationMs = 0): void {
+    const configured = this.getConfig();
+    const windowMs = effectiveActiveWindowMs(configured, cycleDurationMs);
+    // растянутое окно должно попасть и в тексты улик («N активных IP в окне M мин»)
+    const cfg =
+      windowMs === configured.activeWindowMin * 60_000
+        ? configured
+        : { ...configured, activeWindowMin: Math.ceil(windowMs / 60_000) };
+    const windowStart = now - windowMs;
 
     const rows = this.stmt.activeObs.all(windowStart);
 

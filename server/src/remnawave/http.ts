@@ -64,6 +64,39 @@ async function api<T>(opts: HttpOpts, method: 'GET' | 'POST', path: string, body
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// размер страницы списка юзеров: обе ветки панели принимают до 1000
+const USERS_PAGE = 1000;
+
+/** юзер, как его отдаёт список панели: трафик вложен, uuid есть только в 2.7.x */
+type RawUser = Omit<RemnaUser, 'usedTrafficBytes' | 'onlineAt' | 'expireAt' | 'uuid'> & {
+  expireAt: string | null;
+  userTraffic: { usedTrafficBytes: number; onlineAt: string | null };
+  /** 2.7.x отдаёт uuid; в новых версиях панели его в списке нет — есть vlessUuid */
+  uuid?: string;
+  vlessUuid?: string;
+};
+
+function mapUser(u: RawUser): RemnaUser {
+  return {
+    id: u.id,
+    // фолбэк для панелей новее 2.7.x, где uuid в списке юзеров отсутствует
+    uuid: u.uuid ?? u.vlessUuid ?? u.shortUuid,
+    shortUuid: u.shortUuid,
+    username: u.username,
+    status: u.status,
+    telegramId: u.telegramId,
+    email: u.email,
+    tag: u.tag,
+    expireAt: u.expireAt,
+    trafficLimitBytes: u.trafficLimitBytes ?? 0,
+    hwidDeviceLimit: u.hwidDeviceLimit ?? null,
+    subscriptionUrl: u.subscriptionUrl ?? null,
+    usedTrafficBytes: u.userTraffic?.usedTrafficBytes ?? 0,
+    onlineAt: u.userTraffic?.onlineAt ?? null,
+    description: u.description ?? null,
+  };
+}
+
 /**
  * Читающий клиент. Здесь нет ни одного вызова, меняющего состояние панели:
  * fetch-users-ips — это тот же job, который запускает страница «Обозреватель сессий».
@@ -80,47 +113,48 @@ export class HttpRemnaReader implements RemnaReader {
   }
 
   async getAllUsers(): Promise<RemnaUser[]> {
-    const pageSize = 500;
+    // 3.x отдаёт юзеров keyset-курсором — без OFFSET, который на десятках тысяч строк
+    // с каждой страницей всё медленнее; на 2.7.x и до детекта версии — постранично
+    if (this.ver.v === '3') {
+      try {
+        return await this.getAllUsersByCursor();
+      } catch (err) {
+        if (!is404(err)) throw err; // ранняя 3.x без /users/stream — постранично
+      }
+    }
+    return this.getAllUsersByOffset();
+  }
+
+  private async getAllUsersByOffset(): Promise<RemnaUser[]> {
     const users: RemnaUser[] = [];
-    for (let start = 0; ; start += pageSize) {
-      const data = await api<{
-        response: {
-          total: number;
-          users: Array<
-            Omit<RemnaUser, 'usedTrafficBytes' | 'onlineAt' | 'expireAt' | 'uuid'> & {
-              expireAt: string | null;
-              userTraffic: { usedTrafficBytes: number; onlineAt: string | null };
-              /** 2.7.x отдаёт uuid; в новых версиях панели его в списке нет — есть vlessUuid */
-              uuid?: string;
-              vlessUuid?: string;
-            }
-          >;
-        };
-      }>(this.opts, 'GET', `/api/users/?start=${start}&size=${pageSize}`);
+    for (let start = 0; ; start += USERS_PAGE) {
+      const data = await api<{ response: { total: number; users: RawUser[] } }>(
+        this.opts,
+        'GET',
+        `/api/users/?start=${start}&size=${USERS_PAGE}`,
+      );
       // детект версии панели: 2.7.x отдаёт uuid юзера в списке, 3.x — нет
       const first = data.response.users[0];
       if (first) this.ver.set(first.uuid !== undefined ? '2' : '3');
-      for (const u of data.response.users) {
-        users.push({
-          id: u.id,
-          // фолбэк для панелей новее 2.7.x, где uuid в списке юзеров отсутствует
-          uuid: u.uuid ?? u.vlessUuid ?? u.shortUuid,
-          shortUuid: u.shortUuid,
-          username: u.username,
-          status: u.status,
-          telegramId: u.telegramId,
-          email: u.email,
-          tag: u.tag,
-          expireAt: u.expireAt,
-          trafficLimitBytes: u.trafficLimitBytes ?? 0,
-          hwidDeviceLimit: u.hwidDeviceLimit ?? null,
-          subscriptionUrl: u.subscriptionUrl ?? null,
-          usedTrafficBytes: u.userTraffic?.usedTrafficBytes ?? 0,
-          onlineAt: u.userTraffic?.onlineAt ?? null,
-          description: u.description ?? null,
-        });
-      }
+      for (const u of data.response.users) users.push(mapUser(u));
       if (users.length >= data.response.total || data.response.users.length === 0) break;
+    }
+    return users;
+  }
+
+  private async getAllUsersByCursor(): Promise<RemnaUser[]> {
+    const users: RemnaUser[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const query = `size=${USERS_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const data: { response: { users: RawUser[]; nextCursor: string | null; hasMore: boolean } } = await api(
+        this.opts,
+        'GET',
+        `/api/users/stream?${query}`,
+      );
+      for (const u of data.response.users) users.push(mapUser(u));
+      if (!data.response.hasMore || !data.response.nextCursor || data.response.users.length === 0) break;
+      cursor = data.response.nextCursor;
     }
     return users;
   }
@@ -206,10 +240,16 @@ export class HttpRemnaReader implements RemnaReader {
     return this.pollSessions(nodeUuid, `/api/connections/by-node/${started.response.jobId}`);
   }
 
-  /** Job выполняется на ноде; ждём результат с бэкоффом, максимум ~60 сек */
+  /**
+   * Job выполняется на ноде и обычно готов за секунду: первые секунды спрашиваем часто,
+   * дальше реже. Панель держит в работе ограниченное число таких job (5 в 2.7.x, 10 в 3.x),
+   * остальные ждут в её очереди — потолок ожидания ~75 с покрывает и это.
+   */
   private async pollSessions(nodeUuid: string, resultPath: string): Promise<NodeSessions> {
-    for (let attempt = 0; attempt < 30; attempt++) {
-      await sleep(Math.min(500 + attempt * 250, 3000));
+    const POLL_SCHEDULE_MS = [300, 300, 400, 500, 750, 1000, 1500, 2000];
+    const deadline = Date.now() + 75_000;
+    for (let attempt = 0; Date.now() < deadline; attempt++) {
+      await sleep(POLL_SCHEDULE_MS[attempt] ?? 3000);
       const data = await api<{
         response: {
           isCompleted: boolean;

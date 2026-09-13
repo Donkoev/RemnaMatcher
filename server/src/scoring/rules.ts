@@ -25,7 +25,10 @@ export interface ScoringConfig {
     pollIntervalSec: number;
     /** пауза между стартами опросов нод, мс */
     nodePollGapMs: number;
-    /** сколько нод опрашивать одновременно (job выполняется на самой ноде) */
+    /**
+     * сколько нод опрашивать одновременно. Job выполняется на самой ноде, панель лишь брокерит,
+     * но держит в работе не больше 5 таких job (2.7.x) или 10 (3.x) — выше этого не ускорит
+     */
     nodeConcurrency: number;
     /** синхронизация справочника юзеров (и HWID-лимитов), сек */
     userSyncIntervalSec: number;
@@ -68,7 +71,7 @@ export interface ScoringConfig {
 export const DEFAULT_CONFIG: ScoringConfig = {
   activeWindowMin: 5,
   uniqueWindowMin: 10,
-  collector: { pollIntervalSec: 60, nodePollGapMs: 500, nodeConcurrency: 5, userSyncIntervalSec: 300, retentionHours: 48 },
+  collector: { pollIntervalSec: 60, nodePollGapMs: 100, nodeConcurrency: 10, userSyncIntervalSec: 300, retentionHours: 48 },
   thresholds: { yellow: 40, orange: 70, red: 100 },
   decayHalfLifeHours: 6,
   trafficRateBps: 3 * 1024 * 1024,

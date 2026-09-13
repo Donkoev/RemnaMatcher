@@ -10,6 +10,7 @@ import type { RemnaReader } from '../remnawave/types.js';
 import type { Actions, ActionName } from '../actions.js';
 import { bus } from '../events.js';
 import { DEFAULT_CONFIG, type ScoringConfig } from '../scoring/rules.js';
+import { effectiveActiveWindowMs } from '../scoring/window.js';
 import { Auth, hashPassword, verifyPassword } from './auth.js';
 import { fetchPublic } from './net.js';
 import { registerRedRoutes } from './red.js';
@@ -198,10 +199,14 @@ export async function startApi(opts: {
   bus.on('cycle', (ev) => {
     lastCycle = { at: ev.at, durationMs: ev.durationMs };
   });
+  // окно «активных IP» — то же, что у движка: растянуто до круга опроса, если тот длиннее окна
+  const activeWindowMs = (cfg: ScoringConfig): number =>
+    effectiveActiveWindowMs(cfg, lastCycle.at > 0 ? lastCycle.durationMs : 0);
 
   app.get('/api/overview', () => {
     const cfg = loadScoringConfig(db);
-    const windowStart = Date.now() - cfg.activeWindowMin * 60_000;
+    const windowMs = activeWindowMs(cfg);
+    const windowStart = Date.now() - windowMs;
     const totals = db
       .prepare<[number], { activeIps: number; uniqueIps: number; activeUsers: number }>(
         `SELECT COUNT(*) AS activeIps, COUNT(DISTINCT ip) AS uniqueIps, COUNT(DISTINCT user_id) AS activeUsers
@@ -238,6 +243,7 @@ export async function startApi(opts: {
       // нода «онлайн», если опрошена в пределах двух циклов (минимум 5 минут)
       nodeOnlineWindowMs: Math.max(300_000, lastCycle.durationMs * 2 + 60_000),
       lastCycle: lastCycle.at > 0 ? lastCycle : null,
+      activeWindow: { configuredMs: cfg.activeWindowMin * 60_000, effectiveMs: windowMs },
     };
   });
 
@@ -281,7 +287,7 @@ export async function startApi(opts: {
       .all(...params) as Array<Record<string, unknown> & { signals: string; userId: number }>;
 
     // активные IP юзера, сгруппированные по нодам — для карточки в стиле «Обозревателя сессий»
-    const windowStart = Date.now() - cfg.activeWindowMin * 60_000;
+    const windowStart = Date.now() - activeWindowMs(cfg);
     const ipStmt = db.prepare(
       `SELECT o.node_uuid AS nodeUuid, ns.name AS nodeName, ns.country AS nodeCountry,
               o.ip, MAX(o.last_seen) AS lastSeen,
@@ -391,7 +397,7 @@ export async function startApi(opts: {
       deviceList.length > 0 ? deviceList.length : await remna.getHwidDeviceCount({ id: userId, uuid: user.uuid });
 
     const cfg = loadScoringConfig(db);
-    const windowStart = Date.now() - cfg.activeWindowMin * 60_000;
+    const windowStart = Date.now() - activeWindowMs(cfg);
 
     const ips = db
       .prepare(

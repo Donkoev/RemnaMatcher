@@ -12,6 +12,8 @@ export interface Overview {
   nodeOnlineWindowMs: number;
   /** последний завершённый круг опроса: когда закончился и сколько занял */
   lastCycle: { at: number; durationMs: number } | null;
+  /** окно «активных IP»: настроенное и фактическое — растягивается, если круг опроса длиннее окна */
+  activeWindow: { configuredMs: number; effectiveMs: number };
   mode: 'mock' | 'live';
   /** скрытый раздел инфраструктуры включён строкой NODE_PANEL в .env */
   nodePanel: boolean;

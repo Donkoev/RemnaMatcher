@@ -10,8 +10,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Коллектор: строго read-only по отношению к панели.
- * Ноды опрашиваются ПОСЛЕДОВАТЕЛЬНО с паузой — так же, как это делает
- * штатный «Обозреватель сессий», чтобы не грузить бэкенд панели.
+ * Ноды опрашиваются тем же job, что и штатный «Обозреватель сессий», но не по одной,
+ * как в панели, а параллельно — в пределах того, сколько job панель держит в работе
+ * (5 в 2.7.x, 10 в 3.x). Ноды без онлайн-юзеров пропускаются, справочник юзеров
+ * синхронизируется параллельно с опросом: на сотнях нод круг занимает десятки секунд.
  */
 export class Collector {
   private stopped = false;
@@ -50,22 +52,18 @@ export class Collector {
   }
 
   private async tick(): Promise<void> {
-    const now = Date.now();
-    const t0 = now;
+    const t0 = Date.now();
     const cc = this.getConfig().collector;
 
-    if (now - this.lastUserSync > cc.userSyncIntervalSec * 1000) {
-      await this.syncUsers(now);
-      try {
-        await this.syncHwidDevices(now);
-      } catch (err) {
-        console.error('[collector] hwid sync:', err instanceof Error ? err.message : err);
-      }
-      this.lastUserSync = now;
-    }
+    // синк справочника идёт параллельно с опросом нод: это независимые запросы к панели,
+    // а на десятках тысяч юзеров его страницы иначе задерживали бы старт всего круга
+    const userSync =
+      t0 - this.lastUserSync > cc.userSyncIntervalSec * 1000 ? this.syncUsersAndDevices(t0) : null;
 
     const nodes = (await this.remna.getNodes()).filter((n) => !n.isDisabled);
     let nodesOk = 0;
+    let nodesIdle = 0;
+    let nodesFailed = 0;
     let usersSeen = 0;
     let ipsSeen = 0;
 
@@ -110,19 +108,29 @@ export class Collector {
         ipsSeen += nodeIps;
         upsertNodeStatus.run(node.uuid, node.name, node.countryCode, Date.now(), null, sessions.users.length, nodeIps);
       } catch (err) {
+        nodesFailed++;
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[collector] node ${node.name}: ${msg}`);
         upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, msg, 0, 0);
       }
     };
 
-    // нода, отвалившаяся от панели, job не выполнит — не ждём её больше минуты каждый цикл,
-    // а сразу помечаем причину; вернётся на связь — опросим в следующем круге
+    // Нода, отвалившаяся от панели, job не выполнит — не ждём её, а сразу помечаем причину.
+    // Ноду без единого онлайн-юзера (по счётчику панели) не спрашиваем вовсе: на сотнях нод
+    // это заметная часть круга. Остальные — сначала самые нагруженные: их данные к моменту
+    // скоринга получаются самыми свежими
     const queue: typeof nodes = [];
     for (const node of nodes) {
-      if (node.isConnected) queue.push(node);
-      else upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, 'нода не подключена к панели', 0, 0);
+      if (!node.isConnected) {
+        upsertNodeStatus.run(node.uuid, node.name, node.countryCode, null, 'нода не подключена к панели', 0, 0);
+      } else if ((node.usersOnline ?? 1) <= 0) {
+        nodesIdle++;
+        upsertNodeStatus.run(node.uuid, node.name, node.countryCode, Date.now(), null, 0, 0);
+      } else {
+        queue.push(node);
+      }
     }
+    queue.sort((a, b) => (b.usersOnline ?? 0) - (a.usersOnline ?? 0));
     const workers = Array.from({ length: Math.max(1, cc.nodeConcurrency) }, async (_, wi) => {
       await sleep(wi * cc.nodePollGapMs);
       while (!this.stopped) {
@@ -134,6 +142,8 @@ export class Collector {
     });
     await Promise.all(workers);
     if (this.stopped) return;
+
+    if (userSync) await userSync;
 
     // репорты торрент-блокера (панель хранит последние — дедуп по id)
     try {
@@ -150,16 +160,39 @@ export class Collector {
     }
 
     this.retention(cc.retentionHours);
-    this.engine.run();
+    const durationMs = Date.now() - t0;
+    this.engine.run(Date.now(), durationMs);
+
+    console.log(
+      `[collector] круг ${(durationMs / 1000).toFixed(1)} с: опрошено ${nodesOk} нод, пустых ${nodesIdle}, ` +
+        `с ошибкой ${nodesFailed}; юзеров ${usersSeen}, IP ${ipsSeen}`,
+    );
 
     bus.emit('cycle', {
       at: Date.now(),
-      durationMs: Date.now() - t0,
-      nodesOk,
+      durationMs,
+      nodesOk: nodesOk + nodesIdle,
       nodesTotal: nodes.length,
+      nodesIdle,
       usersSeen,
       ipsSeen,
     });
+  }
+
+  /** справочник юзеров и зеркало устройств; ошибки не роняют круг — ноды опрашиваются независимо */
+  private async syncUsersAndDevices(now: number): Promise<void> {
+    try {
+      await this.syncUsers(now);
+      this.lastUserSync = now;
+    } catch (err) {
+      console.error('[collector] user sync:', err instanceof Error ? err.message : err);
+      return;
+    }
+    try {
+      await this.syncHwidDevices(now);
+    } catch (err) {
+      console.error('[collector] hwid sync:', err instanceof Error ? err.message : err);
+    }
   }
 
   private async syncUsers(now: number): Promise<void> {
