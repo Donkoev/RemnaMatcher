@@ -26,7 +26,29 @@ export class PanelVersionState {
   }
 }
 
+/** ошибка HTTP-ответа панели: статус нужен, чтобы отличать «нет такой ручки» от «панель перегружена» */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    /** из Retry-After при 429/503; 0 — заголовка не было */
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
+  }
+}
+
 const is404 = (err: unknown): boolean => err instanceof Error && err.message.includes('HTTP 404');
+/** временный сбой: панель или прокси перед ней просят подождать либо упали на этом запросе */
+const isTransient = (err: unknown): boolean =>
+  !(err instanceof ApiError) || err.status === 429 || err.status === 408 || err.status >= 500;
+/** причина сбоя одной строкой, без длинного тела ответа */
+const reasonOf = (err: unknown): string => {
+  if (err instanceof ApiError) return `панель ответила HTTP ${err.status}`;
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/abort|timeout/i.test(msg)) return 'панель не ответила за 30 с';
+  return msg.slice(0, 120);
+};
 
 interface HttpOpts {
   baseUrl: string;
@@ -57,9 +79,32 @@ async function api<T>(opts: HttpOpts, method: 'GET' | 'POST', path: string, body
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Remnawave API ${method} ${path} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
+    const retryAfter = Number(res.headers.get('retry-after'));
+    throw new ApiError(
+      `Remnawave API ${method} ${path} -> HTTP ${res.status}: ${text.slice(0, 300)}`,
+      res.status,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0,
+    );
   }
   return (await res.json()) as T;
+}
+
+/**
+ * Запуск job на ноде с повтором при временном сбое (429/5xx/обрыв): один такой ответ панели
+ * не должен списывать ноду на весь круг. Retry-After уважаем, иначе пауза растёт 2 → 5 → 10 с.
+ */
+async function startJobWithRetry(opts: HttpOpts, path: string): Promise<string> {
+  const backoffMs = [2000, 5000, 10_000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const started = await api<{ response: { jobId: string } }>(opts, 'POST', path, {});
+      return started.response.jobId;
+    } catch (err) {
+      if (attempt >= backoffMs.length || !isTransient(err)) throw err;
+      const wait = err instanceof ApiError && err.retryAfterMs > 0 ? err.retryAfterMs : backoffMs[attempt]!;
+      await sleep(Math.min(wait, 30_000));
+    }
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -227,52 +272,62 @@ export class HttpRemnaReader implements RemnaReader {
   }
 
   private async fetchNodeSessionsV2(nodeUuid: string): Promise<NodeSessions> {
-    const started = await api<{ response: { jobId: string } }>(
-      this.opts,
-      'POST',
-      `/api/ip-control/fetch-users-ips/${nodeUuid}`,
-    );
-    return this.pollSessions(nodeUuid, `/api/ip-control/fetch-users-ips/result/${started.response.jobId}`);
+    const jobId = await startJobWithRetry(this.opts, `/api/ip-control/fetch-users-ips/${nodeUuid}`);
+    return this.pollSessions(nodeUuid, `/api/ip-control/fetch-users-ips/result/${jobId}`);
   }
 
   private async fetchNodeSessionsV3(nodeUuid: string): Promise<NodeSessions> {
-    const started = await api<{ response: { jobId: string } }>(
-      this.opts,
-      'POST',
-      `/api/connections/by-node/${nodeUuid}`,
-    );
-    return this.pollSessions(nodeUuid, `/api/connections/by-node/${started.response.jobId}`);
+    const jobId = await startJobWithRetry(this.opts, `/api/connections/by-node/${nodeUuid}`);
+    return this.pollSessions(nodeUuid, `/api/connections/by-node/${jobId}`);
   }
 
   /**
    * Job выполняется на ноде и обычно готов за секунду: первые секунды спрашиваем часто,
    * дальше реже. Панель держит в работе ограниченное число таких job (5 в 2.7.x, 10 в 3.x),
    * остальные ждут в её очереди — потолок ожидания ~75 с покрывает и это.
+   * Сбой ОДНОГО запроса за результатом (429, 5xx, обрыв, таймаут) ноду не списывает:
+   * job в панели живёт, спрашиваем дальше до дедлайна. Списываем только по дедлайну или
+   * когда сама панель говорит, что job провалился либо нода ей не ответила.
    */
   private async pollSessions(nodeUuid: string, resultPath: string): Promise<NodeSessions> {
-    const POLL_SCHEDULE_MS = [300, 300, 400, 500, 750, 1000, 1500, 2000];
+    const POLL_SCHEDULE_MS = [500, 500, 750, 1000, 1500, 2000, 3000];
     const deadline = Date.now() + 75_000;
+    let lastError: string | null = null;
     for (let attempt = 0; Date.now() < deadline; attempt++) {
       await sleep(POLL_SCHEDULE_MS[attempt] ?? 3000);
-      const data = await api<{
-        response: {
-          isCompleted: boolean;
-          isFailed: boolean;
-          // userId: в 2.7.x строка, в 3.x число — нормализуем к строке
-          result: { nodeUuid: string; success: boolean; users: Array<{ userId: number | string; ips: { ip: string; lastSeen: string }[] }> } | null;
-        };
-      }>(this.opts, 'GET', resultPath);
-      const r = data.response;
-      if (r.isFailed) return { nodeUuid, success: false, users: [] };
+      let r: {
+        isCompleted: boolean;
+        isFailed: boolean;
+        // userId: в 2.7.x строка, в 3.x число — нормализуем к строке
+        result: { nodeUuid: string; success: boolean; users: Array<{ userId: number | string; ips: { ip: string; lastSeen: string }[] }> } | null;
+      };
+      try {
+        r = (await api<{ response: typeof r }>(this.opts, 'GET', resultPath)).response;
+      } catch (err) {
+        if (!isTransient(err)) throw err;
+        lastError = reasonOf(err);
+        // панель просит подождать — ждём, сколько сказала (в пределах разумного)
+        if (err instanceof ApiError && err.retryAfterMs > 0) await sleep(Math.min(err.retryAfterMs, 30_000));
+        continue;
+      }
+      if (r.isFailed) return { nodeUuid, success: false, users: [], error: 'панель: job по ноде провалился' };
       if (r.isCompleted && r.result) {
         return {
           nodeUuid: r.result.nodeUuid,
           success: r.result.success,
           users: r.result.users.map((u) => ({ userId: String(u.userId), ips: u.ips })),
+          ...(r.result.success
+            ? {}
+            : { error: 'нода не ответила панели (не подключена, недоступна или без NET_ADMIN)' }),
         };
       }
     }
-    return { nodeUuid, success: false, users: [] };
+    return {
+      nodeUuid,
+      success: false,
+      users: [],
+      error: lastError ? `результат не дождались за 75 с, последний сбой: ${lastError}` : 'результат не дождались за 75 с — очередь панели забита',
+    };
   }
 }
 

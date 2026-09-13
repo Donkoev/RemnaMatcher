@@ -67,10 +67,29 @@ export class Collector {
       });
     }
 
-    const nodes = (await this.remna.getNodes()).filter((n) => !n.isDisabled);
+    const allNodes = await this.remna.getNodes();
+    const nodes = allNodes.filter((n) => !n.isDisabled);
+    // ноды, удалённые из панели, уходят и из статуса — иначе «0/231» при 150 живых.
+    // Пустой список считаем сбоем панели, а не «все ноды удалены»
+    if (allNodes.length > 0) {
+      const alive = new Set(allNodes.map((n) => n.uuid));
+      const stale = this.db
+        .prepare<[], { node_uuid: string }>('SELECT node_uuid FROM node_status')
+        .all()
+        .filter((r) => !alive.has(r.node_uuid));
+      if (stale.length > 0) {
+        const del = this.db.prepare('DELETE FROM node_status WHERE node_uuid = ?');
+        const tx = this.db.transaction(() => {
+          for (const r of stale) del.run(r.node_uuid);
+        });
+        tx();
+        console.log(`[collector] убрано нод, которых нет в панели: ${stale.length}`);
+      }
+    }
     let nodesOk = 0;
     let nodesIdle = 0;
     let nodesFailed = 0;
+    const failReasons = new Map<string, number>();
     let usersSeen = 0;
     let ipsSeen = 0;
 
@@ -103,7 +122,7 @@ export class Collector {
     const pollNode = async (node: (typeof nodes)[number]): Promise<void> => {
       try {
         const sessions = await this.remna.fetchNodeSessions(node.uuid);
-        if (!sessions.success) throw new Error('node job failed');
+        if (!sessions.success) throw new Error(sessions.error ?? 'панель вернула job без результата');
 
         let nodeIps = 0;
         const tx = this.db.transaction(() => {
@@ -126,6 +145,7 @@ export class Collector {
       } catch (err) {
         nodesFailed++;
         const msg = err instanceof Error ? err.message : String(err);
+        failReasons.set(msg, (failReasons.get(msg) ?? 0) + 1);
         console.error(`[collector] node ${node.name}: ${msg}`);
         markNodeError.run(node.uuid, node.name, node.countryCode, msg);
       }
@@ -135,11 +155,15 @@ export class Collector {
     // Ноду без единого онлайн-юзера (по счётчику панели) не спрашиваем вовсе: на сотнях нод
     // это заметная часть круга. Остальные — сначала самые нагруженные: их данные к моменту
     // скоринга получаются самыми свежими
+    // Пропускаем только по ЯВНОМУ значению поля: если панель его не отдала (другая версия,
+    // другое имя) — ноду опрашиваем, а не списываем молча
     const queue: typeof nodes = [];
     for (const node of nodes) {
-      if (!node.isConnected) {
+      if (node.isConnected === false) {
+        nodesFailed++;
+        failReasons.set('нода не подключена к панели', (failReasons.get('нода не подключена к панели') ?? 0) + 1);
         markNodeError.run(node.uuid, node.name, node.countryCode, 'нода не подключена к панели');
-      } else if ((node.usersOnline ?? 1) <= 0) {
+      } else if (typeof node.usersOnline === 'number' && node.usersOnline <= 0) {
         nodesIdle++;
         upsertNodeStatus.run(node.uuid, node.name, node.countryCode, Date.now(), null, 0, 0);
       } else {
@@ -177,9 +201,15 @@ export class Collector {
     const durationMs = Date.now() - t0;
     this.engine.run(Date.now(), durationMs);
 
+    // в лог — и топ причин отказов: по нему видно, панель это, ноды или сеть
+    const topReasons = [...failReasons.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([reason, n]) => `${n}× ${reason}`)
+      .join('; ');
     console.log(
       `[collector] круг ${(durationMs / 1000).toFixed(1)} с: опрошено ${nodesOk} нод, пустых ${nodesIdle}, ` +
-        `с ошибкой ${nodesFailed}; юзеров ${usersSeen}, IP ${ipsSeen}`,
+        `с ошибкой ${nodesFailed}; юзеров ${usersSeen}, IP ${ipsSeen}${topReasons ? ` | ${topReasons}` : ''}`,
     );
 
     bus.emit('cycle', {
@@ -188,6 +218,7 @@ export class Collector {
       nodesOk: nodesOk + nodesIdle,
       nodesTotal: nodes.length,
       nodesIdle,
+      nodesFailed,
       usersSeen,
       ipsSeen,
     });
@@ -197,7 +228,8 @@ export class Collector {
   private async syncUsersAndDevices(now: number): Promise<void> {
     try {
       await this.syncUsers(now);
-      this.lastUserSync = now;
+      // интервал считаем от конца синка: долгий синк не должен стартовать заново сразу по окончании
+      this.lastUserSync = Date.now();
     } catch (err) {
       console.error('[collector] user sync:', err instanceof Error ? err.message : err);
       return;
@@ -225,8 +257,11 @@ export class Collector {
       'INSERT OR IGNORE INTO traffic_snapshots (user_id, ts, used) VALUES (?, ?, ?)',
     );
     let pruned = 0;
-    const tx = this.db.transaction(() => {
-      for (const u of users) {
+    // пачками с передышкой: одна транзакция на десятки тысяч юзеров держит event loop секунды,
+    // а в это время висят запросы за результатами job по нодам — их таймауты не должны страдать
+    const BATCH = 5000;
+    const upsertBatch = this.db.transaction((batch: typeof users) => {
+      for (const u of batch) {
         upsertUser.run(
           u.id,
           u.uuid,
@@ -247,19 +282,26 @@ export class Collector {
         );
         insertSnapshot.run(u.id, now, u.usedTrafficBytes);
       }
-      // юзеры, которых панель больше не отдаёт, удалены из неё — сносим их вместе с текущим
-      // состоянием, иначе призраки копятся вечно. История (инциденты, журнал, hwid) остаётся.
-      // Пустой ответ панели считаем сбоем, а не «всех удалили»
-      if (users.length > 0) {
+    });
+    for (let i = 0; i < users.length; i += BATCH) {
+      if (this.stopped) return;
+      upsertBatch(users.slice(i, i + BATCH));
+      await sleep(0);
+    }
+    // юзеры, которых панель больше не отдаёт, удалены из неё — сносим их вместе с текущим
+    // состоянием, иначе призраки копятся вечно. История (инциденты, журнал, hwid) остаётся.
+    // Пустой ответ панели считаем сбоем, а не «всех удалили»
+    if (users.length > 0) {
+      const prune = this.db.transaction(() => {
         pruned = this.db.prepare('DELETE FROM users WHERE synced_at < ?').run(now).changes;
         if (pruned > 0) {
           for (const table of ['score_state', 'ip_observations', 'traffic_snapshots', 'whitelist']) {
             this.db.prepare(`DELETE FROM ${table} WHERE user_id NOT IN (SELECT id FROM users)`).run();
           }
         }
-      }
-    });
-    tx();
+      });
+      prune();
+    }
     console.log(`[collector] user sync: ${users.length} users${pruned > 0 ? `, удалено из панели: ${pruned}` : ''}`);
   }
 

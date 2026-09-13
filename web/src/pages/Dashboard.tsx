@@ -83,6 +83,14 @@ export function Dashboard() {
   const nodesOnline = overview?.nodes.filter((n) => n.last_ok_at && Date.now() - n.last_ok_at < nodeWindow).length ?? 0;
   const nodesTotal = overview?.nodes.length ?? 0;
   const brokenNodes = overview?.nodes.filter((n) => !n.last_ok_at || Date.now() - n.last_ok_at >= nodeWindow) ?? [];
+  // причины отказов с количеством — по ним видно, панель это, ноды или сеть, без логов
+  const brokenByReason = [...brokenNodes.reduce((m, n) => {
+    const reason = n.last_err ?? 'нет данных с последнего круга';
+    const entry = m.get(reason) ?? { count: 0, names: [] as string[] };
+    entry.count++;
+    if (entry.names.length < 3) entry.names.push(n.name);
+    return m.set(reason, entry);
+  }, new Map<string, { count: number; names: string[] }>())].sort((a, b) => b[1].count - a[1].count);
   // человеческая длительность последнего круга опроса
   const cycleText = overview?.lastCycle
     ? overview.lastCycle.durationMs < 10_000
@@ -129,12 +137,27 @@ export function Dashboard() {
           <Tooltip
             disabled={!overview}
             label={
-              brokenNodes.length > 0
-                ? `нет данных: ${brokenNodes.map((n) => n.name).join(', ')}`
-                : overview?.lastCycle
-                  ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}${windowNote}`
-                  : 'ждём первый опрос'
+              <Stack gap={4}>
+                <Text fz="xs">
+                  {overview?.lastCycle
+                    ? `последний круг опроса занял ${cycleText}, закончился ${timeAgo(overview.lastCycle.at)}${windowNote}`
+                    : 'ждём первый опрос'}
+                </Text>
+                {brokenByReason.slice(0, 6).map(([reason, { count, names }]) => (
+                  <Text fz="xs" key={reason}>
+                    {count} × {reason}
+                    {count > names.length ? ` (${names.join(', ')}…)` : ` (${names.join(', ')})`}
+                  </Text>
+                ))}
+                {brokenByReason.length > 6 && (
+                  <Text c="dimmed" fz="xs">
+                    …и ещё {brokenByReason.length - 6} причин
+                  </Text>
+                )}
+              </Stack>
             }
+            maw={520}
+            multiline
           >
             <div>
               <MetricCard

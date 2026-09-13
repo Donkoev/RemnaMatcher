@@ -43,6 +43,8 @@ export interface NodeSessions {
   nodeUuid: string;
   success: boolean;
   users: UserIps[];
+  /** причина, когда success=false — человекочитаемо, для статуса ноды и лога */
+  error?: string;
 }
 
 export interface TorrentReport {

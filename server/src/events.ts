@@ -19,6 +19,8 @@ export interface CycleEvent {
   nodesTotal: number;
   /** ноды без онлайн-юзеров, пропущенные без запроса */
   nodesIdle: number;
+  /** ноды, по которым круг не получил данных */
+  nodesFailed: number;
   usersSeen: number;
   ipsSeen: number;
 }
