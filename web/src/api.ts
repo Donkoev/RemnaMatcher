@@ -319,24 +319,74 @@ export interface RedSubServer {
   pool?: RedSubServer[];
 }
 
+// источник спидтеста на ноде: зеркало загрузки или приёмник отдачи
+export interface RedSpeedSource {
+  name: string;
+  dir: 'down' | 'up';
+  mbps: number;
+  /** сколько потоков ноды сейчас на нём */
+  streams: number;
+  bytes: number;
+  /** источник на паузе — причина (напр. HTTP 429) */
+  error: string | null;
+}
+
 // живой статус непрерывного спидтеста на ноде (скорости в Мбит/с)
 export interface RedSpeedStatus {
   running: boolean;
+  /** probe — проба источников на старте, run — основной замер, done — остановлен */
+  phase?: 'probe' | 'run' | 'done';
+  /** задержка запроса через сервер по прогретому соединению, мс */
   pingMs?: number | null;
   elapsedS?: number;
   downBytes?: number;
   upBytes?: number;
-  /** текущая скорость — окно между опросами статуса */
+  /** последняя секунда */
   downCurrentMbps?: number | null;
   upCurrentMbps?: number | null;
+  /** среднее за последние 10 с */
+  downSustainedMbps?: number | null;
+  upSustainedMbps?: number | null;
   downPeakMbps?: number | null;
   upPeakMbps?: number | null;
+  /** среднее за замер без прогрева */
   downAvgMbps?: number | null;
   upAvgMbps?: number | null;
-  /** последняя ошибка направления — почему поток не даёт данных (напр. HTTP 429) */
+  /** направление стоит — причина, почему ни один источник не даёт данных */
   downError?: string | null;
   upError?: string | null;
+  /** загрузка CPU ноды — упёрлись в процессор, а не в канал */
+  cpuPct?: number | null;
+  streamsDown?: number;
+  streamsUp?: number;
+  sources?: RedSpeedSource[];
+  notes?: string[];
   error?: string;
+}
+
+// нода в запуске спидтеста: статус с агента и причина, если она выбыла или не стартовала
+export interface RedSpeedNode {
+  serverId: number;
+  name: string;
+  running: boolean;
+  error: string | null;
+  status: RedSpeedStatus | null;
+}
+
+// запуск спидтеста: живёт на сервере панели, страница только читает его
+export interface RedSpeedRun {
+  subId: number;
+  /** сервер подписки «address:port» */
+  key: string;
+  startedAt: number;
+  stoppedAt: number | null;
+  nodes: RedSpeedNode[];
+}
+
+export interface RedSpeedState {
+  active: boolean;
+  /** живой или последний завершённый запуск */
+  run: RedSpeedRun | null;
 }
 
 export interface RedSubscription {
@@ -399,10 +449,10 @@ export const redApi = {
   // непрерывный спидтест сервера подписки (key — «address:port») силами ноды serverId:
   // start запускает на ноде постоянную загрузку+отдачу через outbound сервера,
   // status поллится и отдаёт живые скорости, stop глушит и возвращает итог
-  speedtestStart: (id: number, key: string, serverId: number) =>
-    post<{ ok: boolean; pingMs: number | null }>(`/api/red/subscriptions/${id}/speedtest/start`, { key, serverId }),
-  speedtestStatus: (serverId: number) => json<RedSpeedStatus>(`/api/red/speedtest/status/${serverId}`),
-  speedtestStop: (serverId: number) => post<RedSpeedStatus>('/api/red/speedtest/stop', { serverId }),
+  speedtest: () => json<RedSpeedState>('/api/red/speedtest'),
+  speedtestStart: (body: { subId: number; key: string; serverIds: number[] }) =>
+    post<RedSpeedState>('/api/red/speedtest/start', body),
+  speedtestStop: () => post<RedSpeedState>('/api/red/speedtest/stop', {}),
 };
 
 export const hwidApi = {

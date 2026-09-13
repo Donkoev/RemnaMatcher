@@ -315,6 +315,26 @@ body {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
+/* разбивка по источникам внутри карточки ноды */
+.rr-speed-sources {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rr-speed-sources-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--mantine-color-dimmed);
+}
+.rr-speed-src {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
 /* пульсирующая точка живого замера */
 .rr-live-dot {
   width: 8px;

@@ -20,6 +20,7 @@ import {
 } from '../red/subscriptions.js';
 import { serverOutbound, urlTestOutbounds } from '../red/urltest.js';
 import { agentSpeedStart, agentSpeedStatus, agentSpeedStop, type AgentAddr } from '../red/agent.js';
+import { SpeedRunError, SpeedRunner, persistRun, readPersistedRun, type SpeedNodeTarget } from '../red/speedrun.js';
 
 // ===== Инфраструктура: подключённые узлы, конфигурации, спидтест =====
 // Регистрируется только при NODE_PANEL в .env; все ручки живут под /api/red/*
@@ -308,24 +309,40 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     return { results };
   });
 
-  // Непрерывный спидтест силами ноды: start запускает на ней постоянную загрузку+отдачу
-  // через outbound сервера подписки, status отдаёт живые скорости (панель поллит),
-  // stop глушит и возвращает итог. Несколько нод могут мерить одновременно — каждая
-  // гоняет свой трафик сама; без опросов статуса нода глушит замер через 30 с
+  // Непрерывный спидтест силами нод: владелец замера — панель (см. red/speedrun.ts).
+  // start запускает на выбранных нодах параллельные потоки через outbound сервера подписки,
+  // дальше панель сама опрашивает агентов и отдаёт странице одно состояние; stop глушит
+  // все ноды и оставляет итог. Страница может обновляться и закрываться — замер идёт.
   const nodeById = (serverId: number) =>
     db.prepare<[number], RedServerRow>('SELECT * FROM red_servers WHERE id = ?').get(serverId);
-
-  const SpeedStartBody = z.object({ key: z.string().min(3).max(300), serverId: z.number().int().positive() });
-  app.post('/api/red/subscriptions/:id/speedtest/start', async (req, reply) => {
-    const parsed = SpeedStartBody.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Нужны ключ сервера (address:port) и id ноды' });
-    const id = Number((req.params as { id: string }).id);
-    const row = db.prepare<[number], RedSubscriptionRow>('SELECT * FROM red_subscriptions WHERE id = ?').get(id);
-    if (!row) return reply.code(404).send({ error: 'Подписка не найдена' });
-    const node = nodeById(parsed.data.serverId);
-    if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
+  const speedTarget = (serverId: number): SpeedNodeTarget => {
+    const node = nodeById(serverId);
+    if (!node) return { serverId, name: `#${serverId}`, agent: null, error: 'Нода не найдена' };
     const agent = agentOf(node);
-    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
+    return { serverId, name: node.name, agent, error: agent ? undefined : noAgentError(node) };
+  };
+  const runner = new SpeedRunner({
+    client: { start: agentSpeedStart, status: agentSpeedStatus, stop: agentSpeedStop },
+    persist: (r) => persistRun(db, r),
+  });
+  // рестарт панели: подхватываем запуск, который агенты ещё держат (без опросов они ждут ~30 с)
+  const persisted = readPersistedRun(db);
+  if (persisted) runner.adopt(persisted, persisted.serverIds.map(speedTarget));
+
+  app.get('/api/red/speedtest', () => runner.state());
+
+  const SpeedStartBody = z.object({
+    subId: z.number().int().positive(),
+    key: z.string().min(3).max(300),
+    serverIds: z.array(z.number().int().positive()).min(1).max(50),
+  });
+  app.post('/api/red/speedtest/start', async (req, reply) => {
+    const parsed = SpeedStartBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Нужны подписка, ключ сервера (address:port) и ноды' });
+    const { subId, key, serverIds } = parsed.data;
+    if (runner.state().active) return reply.code(409).send({ error: 'Замер уже идёт — сначала останови его' });
+    const row = db.prepare<[number], RedSubscriptionRow>('SELECT * FROM red_subscriptions WHERE id = ?').get(subId);
+    if (!row) return reply.code(404).send({ error: 'Подписка не найдена' });
     let servers: SubServer[] = [];
     try {
       servers = JSON.parse(row.servers) as SubServer[];
@@ -334,39 +351,23 @@ export function registerRedRoutes(app: FastifyInstance, db: Database.Database): 
     }
     let target: SubServer | null = null;
     const find = (s: SubServer) => {
-      if (!target && s.address && s.port != null && `${s.address}:${s.port}` === parsed.data.key) target = s;
+      if (!target && s.address && s.port != null && `${s.address}:${s.port}` === key) target = s;
       s.pool?.forEach(find);
     };
     servers.forEach(find);
     if (!target) return reply.code(404).send({ error: 'Сервер не найден в подписке' });
     const outbound = serverOutbound(target);
     if (!outbound) return reply.code(400).send({ error: 'Для сервера нет данных подключения — обнови подписку' });
-    const r = await agentSpeedStart(agent, outbound);
-    if (!r.ok) return reply.code(502).send({ error: r.error ?? 'Не удалось запустить замер' });
-    return { ok: true, pingMs: r.pingMs ?? null };
+    try {
+      return await runner.start(subId, key, outbound, [...new Set(serverIds)].map(speedTarget));
+    } catch (e) {
+      if (e instanceof SpeedRunError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
   });
 
-  app.get('/api/red/speedtest/status/:serverId', async (req, reply) => {
-    const node = nodeById(Number((req.params as { serverId: string }).serverId));
-    if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
-    const agent = agentOf(node);
-    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
-    const st = await agentSpeedStatus(agent);
-    if (!st) return reply.code(502).send({ error: 'нет связи с агентом' });
-    return st;
-  });
-
-  app.post('/api/red/speedtest/stop', async (req, reply) => {
-    const parsed = z.object({ serverId: z.number().int().positive() }).safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Нужен id ноды' });
-    const node = nodeById(parsed.data.serverId);
-    if (!node) return reply.code(404).send({ error: 'Нода не найдена' });
-    const agent = agentOf(node);
-    if (!agent) return reply.code(400).send({ error: noAgentError(node) });
-    // агент не ответил — не страшно: без опросов статуса он заглушит замер сам
-    const st = await agentSpeedStop(agent);
-    return st ?? { running: false };
-  });
+  // агент не ответил на стоп — не страшно: без опросов статуса он заглушит замер сам
+  app.post('/api/red/speedtest/stop', () => runner.stop());
 
   startRedServerPoller(db);
 }

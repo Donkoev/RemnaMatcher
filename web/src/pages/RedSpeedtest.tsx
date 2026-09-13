@@ -21,6 +21,7 @@ import {
   TbArrowsSplit2,
   TbChevronRight,
   TbClockHour3,
+  TbCpu,
   TbDownload,
   TbGauge,
   TbPlayerPlay,
@@ -29,13 +30,14 @@ import {
   TbUpload,
 } from 'react-icons/tb';
 import { PiEmptyDuotone } from 'react-icons/pi';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   formatBytes,
   plural,
   redApi,
   type RedServer,
-  type RedSpeedStatus,
+  type RedSpeedNode,
+  type RedSpeedSource,
   type RedSubServer,
   type RedSubscription,
 } from '../api';
@@ -45,11 +47,14 @@ import { SectionCard } from '../components/rw/SectionCard';
 // Speedtest в три шага: слева выбор сервера подписки (раскладка как в «Конфигурациях» —
 // балансировщики раскрываются в пул, видно, из какого конфига сервер), в центре ноды
 // (можно несколько — каждая гоняет свой трафик сама), справа живые показатели.
-// Замер непрерывный: нода держит постоянную загрузку и отдачу через outbound сервера,
-// пока не нажать «Остановить»; страница поллит статус и рисует текущую/пиковую/среднюю
-// скорость и прошедший трафик. Без опросов нода сама глушит замер через 30 с.
+// Замер непрерывный и принадлежит серверу панели: он сам опрашивает ноды, а страница только
+// читает его состояние — её можно обновлять, переключать и закрывать, замер идёт, пока не
+// нажать «Остановить». Нода держит потоки загрузки и отдачи сразу по многим источникам и
+// отдаёт текущую/устойчивую/пиковую/среднюю скорость, трафик, CPU и разбивку по источникам.
 
-const POLL_MS = 1500;
+const POLL_MS = 1000;
+const IDLE_POLL_MS = 5000; // без замера — редкий опрос: замер могли запустить из другой вкладки
+const CPU_HOT = 85; // нода упёрлась в процессор — канал шире, чем показывает замер
 
 interface SelServer {
   subId: number;
@@ -64,6 +69,35 @@ function tagLine(s: RedSubServer): string {
   if (s.fromJson) parts.push('json');
   if (s.pool) parts.push(`${s.pool.length} ${plural(s.pool.length, ['сервер', 'сервера', 'серверов'])}`);
   return parts.join(' | ');
+}
+
+/** сервер подписки по ключу «address:port» — в пулах балансировщиков тоже */
+function findServer(subs: RedSubscription[], subId: number, key: string): RedSubServer | null {
+  const walk = (list: RedSubServer[]): RedSubServer | null => {
+    for (const s of list) {
+      const inPool = s.pool ? walk(s.pool) : null;
+      if (inPool) return inPool;
+      if (!s.pool && `${s.address}:${s.port}` === key) return s;
+    }
+    return null;
+  };
+  const sub = subs.find((x) => x.id === subId);
+  return sub ? walk(sub.servers) : null;
+}
+
+/** запуск ссылается на сервер, которого в подписке уже нет — показываем хотя бы адрес */
+function placeholderServer(key: string): RedSubServer {
+  const i = key.lastIndexOf(':');
+  const port = Number(key.slice(i + 1));
+  return {
+    protocol: '',
+    name: key,
+    flag: null,
+    address: i > 0 ? key.slice(0, i) : key,
+    port: Number.isFinite(port) ? port : null,
+    transport: null,
+    security: null,
+  };
 }
 
 function RowBody({ s, small }: { s: RedSubServer; small?: boolean }) {
@@ -178,7 +212,7 @@ function fmtSpeed(x: number | null | undefined): { value: string; unit: string }
   return { value: x >= 100 ? String(Math.round(x)) : x.toFixed(1), unit: 'Мбит/с' };
 }
 
-/** короткая запись для строки «пик · сред» */
+/** короткая запись для строки «10с · пик · сред» и разбивки по источникам */
 function fmtShort(x: number | null | undefined): string {
   if (x == null) return '—';
   if (x >= 1000) return `${(x / 1000).toFixed(1)}G`;
@@ -191,13 +225,14 @@ function fmtElapsed(s: number | undefined): string {
   return `${m}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** плитка направления: крупное текущее (или среднее после остановки), под ним пик и среднее */
+/** плитка направления: крупное текущее (или среднее после остановки), под ним устойчивое за 10 с, пик и среднее */
 function SpeedTile({
   icon,
   title,
   color,
   running,
   cur,
+  sustained,
   peak,
   avg,
   error,
@@ -207,11 +242,12 @@ function SpeedTile({
   color: string;
   running: boolean;
   cur?: number | null;
+  sustained?: number | null;
   peak?: number | null;
   avg?: number | null;
   error?: string | null;
 }) {
-  const main = fmtSpeed(running ? (cur ?? avg) : avg);
+  const main = fmtSpeed(running ? (cur ?? sustained ?? avg) : avg);
   // направление стоит (данных нет), а агент запомнил причину — показываем её
   const stalled = error != null && !(running ? cur : avg);
   return (
@@ -240,8 +276,62 @@ function SpeedTile({
           </Text>
         </Tooltip>
       ) : (
-        <Text c="dimmed" fz={10} mt={4}>
-          пик <b>{fmtShort(peak)}</b> · сред <b>{fmtShort(avg)}</b>
+        <Text c="dimmed" fz={10} lineClamp={1} mt={4}>
+          10с <b>{fmtShort(sustained)}</b> · пик <b>{fmtShort(peak)}</b> · сред <b>{fmtShort(avg)}</b>
+        </Text>
+      )}
+    </div>
+  );
+}
+
+/** разбивка по источникам: на каких зеркалах и приёмниках сидят потоки ноды и что они дают */
+function SourceList({ sources }: { sources: RedSpeedSource[] }) {
+  const [open, setOpen] = useState(true);
+  const downs = sources.filter((s) => s.dir === 'down');
+  const ups = sources.filter((s) => s.dir === 'up');
+  const shown = [...downs.slice(0, 5), ...ups.slice(0, 3)];
+  const hidden = sources.length - shown.length;
+  return (
+    <div className="rr-speed-sources">
+      <div className="rr-speed-sources-head" onClick={() => setOpen((v) => !v)}>
+        <TbChevronRight
+          size={12}
+          style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}
+        />
+        <Text c="dimmed" fw={700} fz={10} tt="uppercase">
+          источники · {sources.length}
+        </Text>
+      </div>
+      {open &&
+        shown.map((s) => (
+          <div className="rr-speed-src" key={`${s.dir}:${s.name}`}>
+            {s.dir === 'down' ? (
+              <TbDownload color="var(--mantine-color-teal-4)" size={11} style={{ flexShrink: 0 }} />
+            ) : (
+              <TbUpload color="var(--mantine-color-cyan-4)" size={11} style={{ flexShrink: 0 }} />
+            )}
+            <Text fz={11} style={{ flex: 1, minWidth: 0 }} truncate="end">
+              {s.name}
+            </Text>
+            {s.error ? (
+              <Tooltip label={s.error} multiline radius="md" w={260}>
+                <Text c="red.4" fz={10}>
+                  пауза
+                </Text>
+              </Tooltip>
+            ) : (
+              <Text ff="monospace" fz={11}>
+                {fmtShort(s.mbps)}
+              </Text>
+            )}
+            <Text c="dimmed" ff="monospace" fz={10} style={{ width: 26, textAlign: 'right' }}>
+              {s.streams > 0 ? `×${s.streams}` : ''}
+            </Text>
+          </div>
+        ))}
+      {open && hidden > 0 && (
+        <Text c="dimmed" fz={10}>
+          ещё {hidden}
         </Text>
       )}
     </div>
@@ -249,21 +339,16 @@ function SpeedTile({
 }
 
 /** живая карточка результата по одной ноде */
-function ResultRow({
-  node,
-  st,
-  startError,
-  live,
-}: {
-  node: RedServer;
-  st?: RedSpeedStatus;
-  startError?: string;
-  live: boolean;
-}) {
-  const running = live && !!st?.running;
+function ResultRow({ node, rn, active }: { node: RedServer; rn?: RedSpeedNode; active: boolean }) {
+  const st = rn?.status ?? undefined;
+  const running = !!rn?.running;
+  const probing = running && st?.phase === 'probe';
+  const hotCpu = st?.cpuPct != null && st.cpuPct >= CPU_HOT;
+  // заметки агента (fast.com недоступен и т.п.) — кроме той, что уже показана как причина остановки
+  const notes = (st?.notes ?? []).filter((n) => n !== rn?.error);
   return (
     <div className="rr-speed-card">
-      <Group justify="space-between" mb={st || startError ? 10 : 0} wrap="nowrap">
+      <Group justify="space-between" mb={st || rn?.error ? 10 : 0} wrap="nowrap">
         <Group gap={8} style={{ minWidth: 0 }} wrap="nowrap">
           <ThemeIcon color="red" radius="sm" size="sm" variant="soft">
             <TbServer2 size={14} />
@@ -273,9 +358,9 @@ function ResultRow({
           </Text>
           {running ? (
             <Group gap={6} wrap="nowrap">
-              <div className="rr-live-dot" />
+              {probing ? <Loader color="red" size={10} /> : <div className="rr-live-dot" />}
               <Text c="red.4" fw={700} fz={10} tt="uppercase">
-                live
+                {probing ? 'проба' : 'live'}
               </Text>
             </Group>
           ) : st ? (
@@ -287,12 +372,36 @@ function ResultRow({
         {st && (
           <Group gap={10} style={{ flexShrink: 0 }} wrap="nowrap">
             {st.pingMs != null && (
-              <Group gap={4} wrap="nowrap">
-                <TbActivity color="var(--mantine-color-teal-4)" size={13} />
-                <Text c="dimmed" ff="monospace" fz="xs">
-                  {st.pingMs} мс
-                </Text>
-              </Group>
+              <Tooltip
+                label="Задержка запроса через сервер по прогретому соединению: путь до интернета и обратно, не ICMP-пинг"
+                multiline
+                radius="md"
+                w={250}
+              >
+                <Group gap={4} wrap="nowrap">
+                  <TbActivity color="var(--mantine-color-teal-4)" size={13} />
+                  <Text c="dimmed" ff="monospace" fz="xs">
+                    {st.pingMs} мс
+                  </Text>
+                </Group>
+              </Tooltip>
+            )}
+            {st.cpuPct != null && (
+              <Tooltip
+                label={
+                  hotCpu ? 'Нода упёрлась в процессор — канал шире, чем показывает замер' : 'Загрузка CPU ноды во время замера'
+                }
+                multiline
+                radius="md"
+                w={230}
+              >
+                <Group gap={4} wrap="nowrap">
+                  <TbCpu color={hotCpu ? 'var(--mantine-color-yellow-4)' : 'var(--mantine-color-red-4)'} size={13} />
+                  <Text c={hotCpu ? 'yellow.4' : 'dimmed'} ff="monospace" fz="xs">
+                    {st.cpuPct}%
+                  </Text>
+                </Group>
+              </Tooltip>
             )}
             <Group gap={4} wrap="nowrap">
               <TbClockHour3 color="var(--mantine-color-red-4)" size={13} />
@@ -304,11 +413,7 @@ function ResultRow({
         )}
       </Group>
 
-      {startError ? (
-        <Text c="red.4" fz="xs">
-          {startError}
-        </Text>
-      ) : st ? (
+      {st ? (
         <>
           <SimpleGrid cols={2} spacing={8}>
             <SpeedTile
@@ -319,6 +424,7 @@ function ResultRow({
               icon={<TbDownload size={13} />}
               peak={st.downPeakMbps}
               running={running}
+              sustained={st.downSustainedMbps}
               title="Загрузка"
             />
             <SpeedTile
@@ -329,6 +435,7 @@ function ResultRow({
               icon={<TbUpload size={13} />}
               peak={st.upPeakMbps}
               running={running}
+              sustained={st.upSustainedMbps}
               title="Отдача"
             />
           </SimpleGrid>
@@ -343,9 +450,29 @@ function ResultRow({
             <Text c="dimmed" fz={10}>
               ↓ {formatBytes(st.downBytes ?? 0)} · ↑ {formatBytes(st.upBytes ?? 0)}
             </Text>
+            {running && st.streamsDown != null && (
+              <Text c="dimmed" fz={10} ml="auto" style={{ flexShrink: 0 }}>
+                {st.streamsDown}↓ {st.streamsUp ?? 0}↑ пот.
+              </Text>
+            )}
           </Group>
+          {rn?.error && (
+            <Text c="red.4" fz={10} mt={4}>
+              {rn.error}
+            </Text>
+          )}
+          {notes.map((n) => (
+            <Text c="dimmed" fz={10} key={n} mt={2}>
+              {n}
+            </Text>
+          ))}
+          {st.sources && st.sources.length > 0 && <SourceList sources={st.sources} />}
         </>
-      ) : live ? (
+      ) : rn?.error ? (
+        <Text c="red.4" fz="xs">
+          {rn.error}
+        </Text>
+      ) : active ? (
         <Group gap={6}>
           <Loader color="red" size={12} />
           <Text c="dimmed" fz="xs">
@@ -362,25 +489,42 @@ function ResultRow({
 }
 
 export function RedSpeedtest() {
+  const qc = useQueryClient();
   const { data: subs } = useQuery({ queryKey: ['red-subscriptions'], queryFn: redApi.subscriptions });
   const { data: nodes } = useQuery({ queryKey: ['red-servers'], queryFn: redApi.servers });
+  // замер живёт на сервере панели: страница читает его состояние и поллит, пока он идёт
+  const { data: state } = useQuery({
+    queryKey: ['red-speedtest'],
+    queryFn: redApi.speedtest,
+    refetchInterval: (q) => (q.state.data?.active ? POLL_MS : IDLE_POLL_MS),
+  });
+  const run = state?.run ?? null;
+  const active = state?.active ?? false;
   const agents = (nodes ?? []).filter((n) => n.agentReady);
 
   const [sel, setSel] = useState<SelServer | null>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
-  const [active, setActive] = useState(false);
-  const [activeIds, setActiveIds] = useState<number[]>([]);
-  const [stats, setStats] = useState<Record<number, RedSpeedStatus>>({});
-  const [startErrors, setStartErrors] = useState<Record<number, string>>({});
-  const [busy, setBusy] = useState(false); // запуск/остановка в процессе
+  const [startError, setStartError] = useState<string | null>(null);
 
-  // при первой загрузке отмечаем ноды на связи; выбор пользователя дальше не трогаем
+  // при первой загрузке отмечаем ноды на связи; выбор пользователя дальше не трогаем.
+  // Если на сервере есть запуск (живой или последний) — его выбор важнее, см. ниже
   const preChecked = useRef(false);
   useEffect(() => {
-    if (preChecked.current || agents.length === 0) return;
+    if (preChecked.current || agents.length === 0 || state === undefined) return;
     preChecked.current = true;
+    if (state.run) return;
     setChecked(new Set(agents.filter((n) => n.agentStatus === 'connected').map((n) => n.id)));
-  }, [agents]);
+  }, [agents, state]);
+
+  // открыли (или обновили) страницу при живом или недавнем замере — подхватываем его сервер и ноды
+  const syncedRun = useRef<number | null>(null);
+  useEffect(() => {
+    if (!run || !subs || syncedRun.current === run.startedAt) return;
+    syncedRun.current = run.startedAt;
+    preChecked.current = true;
+    setSel({ subId: run.subId, key: run.key, s: findServer(subs, run.subId, run.key) ?? placeholderServer(run.key) });
+    setChecked(new Set(run.nodes.map((n) => n.serverId)));
+  }, [run, subs]);
 
   const toggleNode = (id: number) =>
     setChecked((prev) => {
@@ -392,87 +536,35 @@ export function RedSpeedtest() {
 
   const checkedAgents = agents.filter((n) => checked.has(n.id));
 
-  const startRun = async () => {
-    if (!sel || active || busy) return;
-    setBusy(true);
-    setStats({});
-    setStartErrors({});
-    const started: number[] = [];
-    // ноды независимы — стартуем параллельно
-    await Promise.all(
-      checkedAgents.map(async (n) => {
-        try {
-          await redApi.speedtestStart(sel.subId, sel.key, n.id);
-          started.push(n.id);
-        } catch (e) {
-          setStartErrors((p) => ({ ...p, [n.id]: e instanceof Error ? e.message : 'не удалось запустить' }));
-        }
-      }),
-    );
-    setActiveIds(started);
-    setActive(started.length > 0);
-    setBusy(false);
-  };
-
-  const stopRun = async () => {
-    setBusy(true);
-    await Promise.all(
-      activeIds.map(async (id) => {
-        try {
-          const st = await redApi.speedtestStop(id);
-          setStats((p) => ({ ...p, [id]: { ...st, running: false } }));
-        } catch {
-          /* агент недоступен — без опросов он заглушит замер сам */
-        }
-      }),
-    );
-    setActive(false);
-    setBusy(false);
-  };
-
-  // поллинг живых показателей, пока замер идёт
-  useEffect(() => {
-    if (!active || activeIds.length === 0) return;
-    let cancelled = false;
-    const tick = async () => {
-      let runningCount = 0;
-      await Promise.all(
-        activeIds.map(async (id) => {
-          try {
-            const st = await redApi.speedtestStatus(id);
-            if (cancelled) return;
-            setStats((p) => ({ ...p, [id]: st }));
-            if (st.running) runningCount++;
-          } catch {
-            runningCount++; // временная потеря связи — не гасим замер
-          }
-        }),
-      );
-      // все ноды сами остановились (вотчдог/рестарт агента) — выключаем поллинг
-      if (!cancelled && runningCount === 0) setActive(false);
-    };
-    void tick();
-    const t = setInterval(() => void tick(), POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [active, activeIds]);
-
-  // уход со страницы при живом замере — глушим (вотчдог на ноде подстрахует)
-  const activeRef = useRef<number[]>([]);
-  activeRef.current = active ? activeIds : [];
-  useEffect(
-    () => () => {
-      activeRef.current.forEach((id) => void redApi.speedtestStop(id).catch(() => {}));
+  const start = useMutation({
+    mutationFn: () => {
+      if (!sel) throw new Error('Сначала выбери сервер слева');
+      return redApi.speedtestStart({ subId: sel.subId, key: sel.key, serverIds: checkedAgents.map((n) => n.id) });
     },
-    [],
-  );
+    onMutate: async () => {
+      setStartError(null);
+      await qc.cancelQueries({ queryKey: ['red-speedtest'] });
+    },
+    onSuccess: (s) => qc.setQueryData(['red-speedtest'], s),
+    onError: (e) => setStartError(e instanceof Error ? e.message : 'не удалось запустить'),
+  });
+  const stop = useMutation({
+    mutationFn: () => redApi.speedtestStop(),
+    // ответ на стоп — итог; опрос, ушедший раньше, не должен его перекрыть
+    onMutate: () => qc.cancelQueries({ queryKey: ['red-speedtest'] }),
+    onSuccess: (s) => qc.setQueryData(['red-speedtest'], s),
+  });
+  const busy = start.isPending || stop.isPending;
+  const locked = active || busy;
+
+  // результаты показываем для того сервера, который мерился; сменил сервер — ждём нового запуска
+  const runMatches = run != null && sel != null && run.subId === sel.subId && run.key === sel.key;
+  const rowFor = (id: number) => (runMatches ? run.nodes.find((n) => n.serverId === id) : undefined);
 
   return (
     <>
       <PageHeader
-        description="Непрерывный замер через сервер подписки силами нод — идёт, пока не остановишь"
+        description="Непрерывный замер через сервер подписки силами нод — идёт, пока не остановишь, даже если закрыть страницу"
         icon={<TbGauge size={22} />}
         title="Speedtest"
       />
@@ -501,7 +593,7 @@ export function RedSpeedtest() {
               <ScrollArea.Autosize mah={560} type="auto">
                 <Stack gap="md">
                   {subs?.map((sub) => (
-                    <PickCard key={sub.id} locked={active || busy} onSelect={setSel} sel={sel} sub={sub} />
+                    <PickCard key={sub.id} locked={locked} onSelect={setSel} sel={sel} sub={sub} />
                   ))}
                 </Stack>
               </ScrollArea.Autosize>
@@ -525,7 +617,7 @@ export function RedSpeedtest() {
                       checked={checked.has(n.id)}
                       color="red"
                       description={n.address}
-                      disabled={active || busy}
+                      disabled={locked}
                       key={n.id}
                       label={
                         <Group gap={6} wrap="nowrap">
@@ -550,9 +642,9 @@ export function RedSpeedtest() {
                   color="red"
                   fullWidth
                   leftSection={<TbPlayerStop size={16} />}
-                  loading={busy}
+                  loading={stop.isPending}
                   mt="md"
-                  onClick={() => void stopRun()}
+                  onClick={() => stop.mutate()}
                   variant="filled"
                 >
                   Остановить замер
@@ -568,9 +660,9 @@ export function RedSpeedtest() {
                     disabled={sel == null || checkedAgents.length === 0}
                     fullWidth
                     leftSection={<TbPlayerPlay size={16} />}
-                    loading={busy}
+                    loading={start.isPending}
                     mt="md"
-                    onClick={() => void startRun()}
+                    onClick={() => start.mutate()}
                     variant="soft"
                   >
                     Запустить замер
@@ -580,7 +672,7 @@ export function RedSpeedtest() {
             </Card>
           </Grid.Col>
 
-          {/* шаг 3: живые показатели — текущее/пик/среднее и трафик по каждой ноде */}
+          {/* шаг 3: живые показатели — текущее/устойчивое/пик/среднее, трафик и источники по каждой ноде */}
           <Grid.Col span={{ base: 12, lg: 4 }}>
             <Card className="rr-server-card" padding="md" radius="md">
               <Text fw={600} mb={4}>
@@ -594,6 +686,11 @@ export function RedSpeedtest() {
                       {sel.s.name} · {sel.key}
                     </Text>
                   </Group>
+                  {startError && (
+                    <Text c="red.4" fz="xs" mb="sm">
+                      {startError}
+                    </Text>
+                  )}
                   {checkedAgents.length === 0 ? (
                     <Text c="dimmed" fz="sm">
                       Отметь ноды, которые будут мерить
@@ -601,13 +698,7 @@ export function RedSpeedtest() {
                   ) : (
                     <Stack gap={6}>
                       {checkedAgents.map((n) => (
-                        <ResultRow
-                          key={n.id}
-                          live={active && activeIds.includes(n.id)}
-                          node={n}
-                          st={stats[n.id]}
-                          startError={startErrors[n.id]}
-                        />
+                        <ResultRow active={active} key={n.id} node={n} rn={rowFor(n.id)} />
                       ))}
                     </Stack>
                   )}

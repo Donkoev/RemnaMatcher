@@ -96,23 +96,50 @@ export async function agentHealth(a: AgentAddr): Promise<AgentHealth | null> {
   }
 }
 
-// Непрерывный спидтест силами ноды: start запускает на ней постоянную загрузку+отдачу
-// через присланный outbound, status отдаёт живые скорости, stop глушит и возвращает итог.
+// Непрерывный спидтест силами ноды: start запускает на ней параллельные потоки загрузки
+// и отдачи по многим источникам через присланный outbound, status отдаёт живые скорости
+// и разбивку по источникам, stop глушит и возвращает итог.
+export interface AgentSpeedSource {
+  name: string;
+  dir: 'down' | 'up';
+  mbps: number;
+  streams: number;
+  bytes: number;
+  /** источник на паузе — причина (напр. HTTP 429) */
+  error: string | null;
+}
+
 export interface AgentSpeedStatus {
   running: boolean;
+  /** probe — проба источников на старте, run — основной замер, done — остановлен */
+  phase?: 'probe' | 'run' | 'done';
+  /** задержка запроса через сервер по прогретому соединению, мс */
   pingMs?: number | null;
   elapsedS?: number;
   downBytes?: number;
   upBytes?: number;
+  /** последняя секунда */
   downCurrentMbps?: number | null;
   upCurrentMbps?: number | null;
+  /** среднее за последние 10 с */
+  downSustainedMbps?: number | null;
+  upSustainedMbps?: number | null;
   downPeakMbps?: number | null;
   upPeakMbps?: number | null;
+  /** среднее за замер без прогрева */
   downAvgMbps?: number | null;
   upAvgMbps?: number | null;
-  /** последняя ошибка направления — почему поток не даёт данных (напр. HTTP 429) */
+  /** направление стоит — причина, почему ни один источник не даёт данных */
   downError?: string | null;
   upError?: string | null;
+  /** загрузка CPU ноды за последнюю секунду — упёрлись в процессор, а не в канал */
+  cpuPct?: number | null;
+  streamsDown?: number;
+  streamsUp?: number;
+  sources?: AgentSpeedSource[];
+  /** заметки агента: недоступный fast.com, причина самостоятельной остановки (последняя) */
+  notes?: string[];
+  version?: string;
   error?: string;
 }
 
